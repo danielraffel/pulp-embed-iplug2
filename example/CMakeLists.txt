@@ -39,7 +39,7 @@ iplug_add_plugin(${PROJECT_NAME}
 )
 
 # Wire the helper header + bake the demo design path onto every produced target.
-set(_ir "${PULP_VIEW_EMBED_DIR}/fixtures/figma-vst-style/design.ir.json")
+set(_ir "${PULP_VIEW_EMBED_DIR}/fixtures/figma-vst-style/bundle")  # importer JS bundle (high-fidelity)
 foreach(_t ${PROJECT_NAME}-app)
   if(TARGET ${_t})
     target_include_directories(${_t} PRIVATE

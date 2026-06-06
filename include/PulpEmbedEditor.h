@@ -15,6 +15,7 @@
 
 #include <pulp_view_embed.h>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -22,8 +23,11 @@ namespace pulp_iplug2 {
 
 class PulpEmbedEditor {
 public:
-    PulpEmbedEditor(std::string designIrJsonPath, int logicalWidth, int logicalHeight)
-        : path_(std::move(designIrJsonPath)), w_(logicalWidth), h_(logicalHeight) {
+    // source is either an importer JS bundle directory (high-fidelity
+    // scripted-UI path; contains ui.js) or a DesignIR JSON file (lightweight
+    // native path) — auto-detected.
+    PulpEmbedEditor(std::string source, int logicalWidth, int logicalHeight)
+        : path_(std::move(source)), w_(logicalWidth), h_(logicalHeight) {
         PulpEmbedDesc d{};
         d.struct_size = sizeof(PulpEmbedDesc);
         d.abi_version = PULP_VIEW_EMBED_ABI_VERSION;
@@ -33,7 +37,14 @@ public:
         d.backend_pref = PULP_EMBED_BACKEND_PREF_AUTO;
         d.design_width = w_;
         d.design_height = h_;
-        pulp_embed_create_from_design_json(&d, path_.c_str(), &view_);
+        std::error_code ec;
+        const bool is_bundle =
+            std::filesystem::is_directory(path_, ec) ||
+            std::filesystem::exists(std::filesystem::path(path_) / "ui.js", ec);
+        if (is_bundle)
+            pulp_embed_create_from_ui_bundle(&d, path_.c_str(), &view_);
+        else
+            pulp_embed_create_from_design_json(&d, path_.c_str(), &view_);
     }
 
     ~PulpEmbedEditor() {
