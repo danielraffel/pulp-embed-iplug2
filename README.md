@@ -48,6 +48,24 @@ ctest --test-dir build --output-on-failure   # runs compilecheck
 `pulp_embed_iplug2` is an INTERFACE target your iPlug2 plugin links; it brings in
 the `pulp_view_embed` C ABI.
 
+## Standalone example
+
+`example/` is a real iPlug2 `IPlugAPP` standalone (UI NONE) that embeds the
+"VST Style" Figma fixture at full fidelity:
+
+```bash
+cmake -S example -B example/build -DCMAKE_BUILD_TYPE=Release \
+  -DIPLUG2_DIR=/path/to/iPlug2 \
+  -DPULP_VIEW_EMBED_DIR=/path/to/pulp-view-embed \
+  -DCMAKE_PREFIX_PATH=/path/to/pulp-sdk-install
+cmake --build example/build --target PulpEmbedIPlug-app -j
+open "example/build/out/PulpEmbedIPlug.app"
+```
+
+iPlug2 must have its prebuilt deps (`Dependencies/download-prebuilt-libs.sh`).
+`PulpEmbedEditor(source, w, h)` auto-detects a `ui.js` bundle dir (high-fidelity
+scripted-UI path) vs a `.json` DesignIR file (lightweight native path).
+
 ## Remaining work
 
 - Wire into a concrete iPlug2 example plugin project (IGraphics editor open path)
