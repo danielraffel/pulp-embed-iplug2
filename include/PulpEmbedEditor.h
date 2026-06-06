@@ -14,7 +14,9 @@
 #pragma once
 
 #include <pulp_view_embed.h>
+#include <cstdio>
 #include <string>
+#include <vector>
 
 namespace pulp_iplug2 {
 
@@ -59,6 +61,29 @@ public:
         return pulp_embed_attach(view_, parentNativeWindow) == PULP_EMBED_OK;
     }
 
+    // Pulp's child native view (NSView*). iPlug2's OpenWindow returns this so
+    // the host can track/resize the editor view.
+    void* nativeHandle() const { return view_ ? pulp_embed_native_handle(view_) : nullptr; }
+
+    // Verification helpers. writeCapturePng grabs the LIVE GPU back buffer (the
+    // on-screen surface); writeRenderPng is the deterministic Skia raster.
+    bool writeCapturePng(const char* path) {
+        if (!view_) return false;
+        size_t n = 0;
+        if (pulp_embed_capture_png(view_, nullptr, 0, &n) != PULP_EMBED_OK || !n) return false;
+        std::vector<uint8_t> png(n);
+        if (pulp_embed_capture_png(view_, png.data(), png.size(), &n) != PULP_EMBED_OK) return false;
+        return write_file(path, png);
+    }
+    bool writeRenderPng(const char* path, int w, int h) {
+        if (!view_) return false;
+        size_t n = 0;
+        if (pulp_embed_render_png(view_, w, h, 1.0f, nullptr, 0, &n) != PULP_EMBED_OK || !n) return false;
+        std::vector<uint8_t> png(n);
+        if (pulp_embed_render_png(view_, w, h, 1.0f, png.data(), png.size(), &n) != PULP_EMBED_OK) return false;
+        return write_file(path, png);
+    }
+
     void close() { if (view_) pulp_embed_detach(view_); }
 
     void resize(int w, int h, float scale) {
@@ -68,6 +93,14 @@ public:
     void tick() { if (view_) pulp_embed_tick(view_); }
 
 private:
+    static bool write_file(const char* path, const std::vector<uint8_t>& b) {
+        if (b.empty()) return false;
+        FILE* f = std::fopen(path, "wb");
+        if (!f) return false;
+        const bool ok = std::fwrite(b.data(), 1, b.size(), f) == b.size();
+        std::fclose(f);
+        return ok;
+    }
     std::string path_;
     int w_ = 0, h_ = 0;
     PulpEmbedView* view_ = nullptr;
