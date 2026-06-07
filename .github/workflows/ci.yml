@@ -1,0 +1,215 @@
+name: CI
+
+# Two macOS gates:
+#
+#  (1) root compile/link check (ALWAYS) — builds pulp_embed_iplug2 (the
+#      framework-neutral INTERFACE adapter) + the compilecheck against the C ABI,
+#      and (because the root CMake add_subdirectory's pulp-view-embed) the
+#      pulp-view-embed embed-smoke. Needs only the installed Pulp SDK +
+#      PULP_EMBED_CI_NO_GPU for a deterministic headless run.
+#
+#  (2) example plugin build (BEST-EFFORT) — builds the real APP/VST3/AU/CLAP
+#      iPlug2 plugin. Needs a developer-supplied iPlug2 checkout with its
+#      prebuilt deps + the VST3/CLAP SDKs, so it only runs when vars.IPLUG2_REPO
+#      is set; otherwise it is skipped with a note (the adapter contract is
+#      already proven by gate 1).
+#
+# GPU reality: hosted macOS runners have no Metal adapter, so the embed-smoke's
+# GPU asserts soft-skip (PULP_EMBED_CI_NO_GPU=1 forces CPU; the asserts are
+# gated on active_backend == GPU). The full GPU lane runs in a Pulp Tart VM
+# (Metal headless) — see the trailing comment.
+#
+# SDK acquisition: actions/cache keyed on PULP_SDK_VERSION, else sha256-verified
+# PULP_SDK_TARBALL_URL, else fail with a clear message (tools/package-sdk.sh
+# lives in pulp-view-embed).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compilecheck:
+    name: compile/link check + embed-smoke (macOS, headless)
+    runs-on: macos-15
+    env:
+      PULP_EMBED_CI_NO_GPU: "1"
+      PULP_SDK_VERSION: ${{ vars.PULP_SDK_VERSION }}
+      PULP_SDK_TARBALL_URL: ${{ vars.PULP_SDK_TARBALL_URL }}
+      PULP_SDK_TARBALL_SHA256: ${{ vars.PULP_SDK_TARBALL_SHA256 }}
+      PULP_VIEW_EMBED_REPO: ${{ vars.PULP_VIEW_EMBED_REPO || 'https://github.com/danielraffel/pulp-view-embed.git' }}
+      PULP_VIEW_EMBED_REF: ${{ vars.PULP_VIEW_EMBED_REF || 'main' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve paths
+        id: paths
+        run: |
+          echo "prefix=${RUNNER_TEMP}/pulp-sdk" >> "$GITHUB_OUTPUT"
+          echo "embed=${RUNNER_TEMP}/pulp-view-embed" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pulp SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.paths.outputs.prefix }}
+          key: pulp-sdk-${{ runner.os }}-${{ runner.arch }}-${{ env.PULP_SDK_VERSION || 'unset' }}
+
+      - name: Acquire Pulp SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          PREFIX="${{ steps.paths.outputs.prefix }}"
+          if [ -z "${PULP_SDK_TARBALL_URL:-}" ]; then
+            echo "::error::No cached Pulp SDK and no PULP_SDK_TARBALL_URL set."
+            echo "::error::Publish a relocatable SDK tarball with pulp-view-embed's tools/package-sdk.sh,"
+            echo "::error::then set repo variables PULP_SDK_VERSION, PULP_SDK_TARBALL_URL, PULP_SDK_TARBALL_SHA256."
+            exit 1
+          fi
+          echo "Downloading SDK from ${PULP_SDK_TARBALL_URL}"
+          curl -fSL "${PULP_SDK_TARBALL_URL}" -o "${RUNNER_TEMP}/pulp-sdk.tar.gz"
+          if [ -n "${PULP_SDK_TARBALL_SHA256:-}" ]; then
+            echo "${PULP_SDK_TARBALL_SHA256}  ${RUNNER_TEMP}/pulp-sdk.tar.gz" | shasum -a 256 -c -
+          else
+            echo "::warning::PULP_SDK_TARBALL_SHA256 not set — skipping checksum verification."
+          fi
+          mkdir -p "${PREFIX}"
+          tar xzf "${RUNNER_TEMP}/pulp-sdk.tar.gz" -C "${RUNNER_TEMP}"
+          inner="$(find "${RUNNER_TEMP}" -maxdepth 1 -type d -name 'pulp-sdk-*' | head -1)"
+          if [ -n "${inner}" ]; then cp -a "${inner}/." "${PREFIX}/"; fi
+          test -f "${PREFIX}/lib/cmake/Pulp/PulpConfig.cmake" \
+            || { echo "::error::Unpacked SDK has no lib/cmake/Pulp/PulpConfig.cmake"; exit 1; }
+
+      - name: Verify SDK present
+        run: |
+          PREFIX="${{ steps.paths.outputs.prefix }}"
+          test -f "${PREFIX}/lib/cmake/Pulp/PulpConfig.cmake" \
+            || { echo "::error::Pulp SDK not available at ${PREFIX} (cache miss + no tarball)."; exit 1; }
+
+      - name: Checkout pulp-view-embed
+        run: |
+          git clone --depth 1 --branch "${PULP_VIEW_EMBED_REF}" \
+            "${PULP_VIEW_EMBED_REPO}" "${{ steps.paths.outputs.embed }}"
+
+      - name: Configure + build + test (compilecheck + embed-smoke)
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${{ steps.paths.outputs.prefix }}" \
+            -DPULP_VIEW_EMBED_DIR="${{ steps.paths.outputs.embed }}"
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+          ctest --test-dir build --output-on-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iplug2-compilecheck-macos
+          path: |
+            /tmp/pulp-embed-*.png
+            /tmp/embed-*.png
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  example-plugin:
+    name: example plugin (APP/VST3/AU/CLAP, best-effort)
+    runs-on: macos-15
+    # Only run when an iPlug2 checkout source is configured. The adapter contract
+    # is already proven by the compilecheck job; this exercises the real
+    # iPlug2-wrapped plugin formats.
+    if: ${{ vars.IPLUG2_REPO != '' }}
+    env:
+      PULP_SDK_VERSION: ${{ vars.PULP_SDK_VERSION }}
+      PULP_SDK_TARBALL_URL: ${{ vars.PULP_SDK_TARBALL_URL }}
+      PULP_SDK_TARBALL_SHA256: ${{ vars.PULP_SDK_TARBALL_SHA256 }}
+      PULP_VIEW_EMBED_REPO: ${{ vars.PULP_VIEW_EMBED_REPO || 'https://github.com/danielraffel/pulp-view-embed.git' }}
+      PULP_VIEW_EMBED_REF: ${{ vars.PULP_VIEW_EMBED_REF || 'main' }}
+      IPLUG2_REPO: ${{ vars.IPLUG2_REPO }}
+      IPLUG2_REF: ${{ vars.IPLUG2_REF || 'master' }}
+      VST3_SDK_TAG: ${{ vars.VST3_SDK_TAG || 'v3.7.12_build_20' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve paths
+        id: paths
+        run: |
+          {
+            echo "prefix=${RUNNER_TEMP}/pulp-sdk"
+            echo "embed=${RUNNER_TEMP}/pulp-view-embed"
+            echo "iplug2=${RUNNER_TEMP}/iPlug2"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Restore Pulp SDK cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.paths.outputs.prefix }}
+          key: pulp-sdk-${{ runner.os }}-${{ runner.arch }}-${{ env.PULP_SDK_VERSION || 'unset' }}
+
+      - name: Acquire Pulp SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          PREFIX="${{ steps.paths.outputs.prefix }}"
+          if [ -z "${PULP_SDK_TARBALL_URL:-}" ]; then
+            echo "::error::No cached Pulp SDK and no PULP_SDK_TARBALL_URL set."
+            exit 1
+          fi
+          curl -fSL "${PULP_SDK_TARBALL_URL}" -o "${RUNNER_TEMP}/pulp-sdk.tar.gz"
+          if [ -n "${PULP_SDK_TARBALL_SHA256:-}" ]; then
+            echo "${PULP_SDK_TARBALL_SHA256}  ${RUNNER_TEMP}/pulp-sdk.tar.gz" | shasum -a 256 -c -
+          fi
+          mkdir -p "${PREFIX}"
+          tar xzf "${RUNNER_TEMP}/pulp-sdk.tar.gz" -C "${RUNNER_TEMP}"
+          inner="$(find "${RUNNER_TEMP}" -maxdepth 1 -type d -name 'pulp-sdk-*' | head -1)"
+          if [ -n "${inner}" ]; then cp -a "${inner}/." "${PREFIX}/"; fi
+
+      - name: Verify SDK present
+        run: |
+          test -f "${{ steps.paths.outputs.prefix }}/lib/cmake/Pulp/PulpConfig.cmake" \
+            || { echo "::error::Pulp SDK not available"; exit 1; }
+
+      - name: Checkout pulp-view-embed
+        run: |
+          git clone --depth 1 --branch "${PULP_VIEW_EMBED_REF}" \
+            "${PULP_VIEW_EMBED_REPO}" "${{ steps.paths.outputs.embed }}"
+
+      - name: Checkout + set up iPlug2 (deps + VST3/CLAP SDKs)
+        run: |
+          set -euo pipefail
+          IPLUG2="${{ steps.paths.outputs.iplug2 }}"
+          git clone --depth 1 --branch "${IPLUG2_REF}" "${IPLUG2_REPO}" "${IPLUG2}"
+          ( cd "${IPLUG2}/Dependencies" && ./download-prebuilt-libs.sh )
+          ( cd "${IPLUG2}/Dependencies/IPlug" && ./download-vst3-sdk.sh "${VST3_SDK_TAG}" )
+          # clap-helpers main references draft exts only in CLAP SDK main — pair them.
+          ( cd "${IPLUG2}/Dependencies/IPlug" && ./download-clap-sdks.sh main main )
+
+      - name: Configure + build example (APP/VST3/AU/CLAP)
+        run: |
+          cmake -S example -B example/build -DCMAKE_BUILD_TYPE=Release \
+            -DIPLUG2_DIR="${{ steps.paths.outputs.iplug2 }}" \
+            -DPULP_VIEW_EMBED_DIR="${{ steps.paths.outputs.embed }}" \
+            -DCMAKE_PREFIX_PATH="${{ steps.paths.outputs.prefix }}"
+          cmake --build example/build -j"$(sysctl -n hw.ncpu)"
+
+      - name: Headless load smokes (CLAP + VST3)
+        run: |
+          set -euo pipefail
+          IPLUG2="${{ steps.paths.outputs.iplug2 }}"
+          cc -std=c11 -I"${IPLUG2}/Dependencies/IPlug/CLAP_SDK/include" \
+            tools/clap_load_smoke.c -o /tmp/clap_load_smoke
+          /tmp/clap_load_smoke example/build/out/PulpEmbedIPlug.clap
+          IPLUG2_DIR="${IPLUG2}" ./tools/build-vst3-smoke.sh
+          /tmp/vst3_load_smoke example/build/out/PulpEmbedIPlug.vst3
+
+# ── Running the full GPU lane in a Tart VM ───────────────────────────────────
+# Hosted runners prove the build + dependency recipe + headless render. The real
+# GPU editor attach + live capture (auval / in-editor GPU render) runs inside a
+# Pulp Tart golden VM where Apple Virtualization exposes Metal headless and an
+# auto-login session lets auval register the component. See Pulp's tart-ci skill
+# and docs/guides/local-ci.md; run the same configure/build/ctest via
+# tools/ci/tart-run-job.sh with no GPU-disable env.

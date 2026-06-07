@@ -12,6 +12,49 @@ Figma frame) in an iPlug2 plugin's editor.
 > format validators (auval / pluginval / CLAP load smoke). DAW load (Logic,
 > REAPER, …) remains a manual step.
 
+## Status / what works / known limitations / roadmap
+
+**What works (macOS):**
+
+- Framework-neutral `PulpEmbedEditor` helper drives the `pulp_view_embed` flat C
+  ABI from an iPlug2 editor's open/resize/tick/close hooks; no Pulp C++ type
+  enters your iPlug2 translation units.
+- `example/` builds a real plugin in **APP + VST3 + AU + CLAP** whose editor IS
+  the embedded Pulp design (`UI NONE`), at full fidelity (importer JS bundle).
+- Both parenting paths: pulp-parents (APP/VST3/CLAP) and host-parents
+  (AUv2 Cocoa view factory).
+- **Interactive parameters (ABI v3):** design controls bind by string key to
+  iPlug2 `IParam`s — a dragged control writes the host param; host automation
+  pushes values back. iPlug2 maps its own params to the design's keys.
+- Offscreen render mode, `resolve_resource` host asset callback, and bundled
+  fonts all flow through the same C ABI.
+- Headless self-check (`PULP_EMBED_SELFCHECK=1`) proves the editor renders +
+  live-captures without a DAW; auval / pluginval / CLAP load smokes pass.
+
+**Known limitations:**
+
+- macOS only today (Windows once `pulp-view-embed` registers a Windows
+  `PluginViewHost` factory).
+- Requires an installed Pulp SDK + a developer-supplied iPlug2 checkout with its
+  prebuilt deps and the VST3/CLAP SDKs.
+- `pulp_embed_resize` validates the DPI scale but treats it as advisory for the
+  windowed editor (the host window drives backing scale); only the deterministic
+  capture APIs honor a caller scale.
+- Real-DAW load (automation/state/window management) is a manual check.
+
+**Resolved design questions** (from the foreign-host-embedding plan):
+
+- *Event-loop tick* — borrowed from the host: the iPlug2 editor's UI timer (and
+  Pulp's GPU display-link) drives `pulp_embed_tick`; the adapter runs no loop.
+- *Parameter model* — string-key based, which maps cleanly onto iPlug2's
+  `IParam` (the plugin owns the param objects and binds each to a design key).
+
+**Roadmap:** Windows host; real-DAW automation/state validation; zero-copy GPU
+compositing (currently CPU RGBA readback for the offscreen path).
+
+Third-party attribution for the borrowed iPlug2 IPlugEffect resource files is in
+[`NOTICE.md`](NOTICE.md).
+
 ## How it embeds
 
 iPlug2 hands the editor a parent native window/view on open. There are two
