@@ -29,7 +29,12 @@ iplug_add_plugin(${PROJECT_NAME}
     PulpEmbedIPlug.h
     PulpEmbedIPlug.mm
     resources/resource.h
-  FORMATS APP
+  # APP standalone + the three real plugin formats. The editor path
+  # (OpenWindow → embed) is format-agnostic: APP/VST3/CLAP pass a real parent
+  # NSView (pulp-parents/attach); AUv2's Cocoa view factory passes nullptr and
+  # parents the returned NSView itself (host-parents/notify_attached). The
+  # plugin handles both — see PulpEmbedIPlug::OpenWindow.
+  FORMATS APP VST3 AU CLAP
   UI NONE
   LINK pulp_view_embed
   # UI NONE drops the IGraphics lib but doesn't define NO_IGRAPHICS, which the
@@ -40,7 +45,7 @@ iplug_add_plugin(${PROJECT_NAME}
 
 # Wire the helper header + bake the demo design path onto every produced target.
 set(_ir "${PULP_VIEW_EMBED_DIR}/fixtures/figma-vst-style/bundle")  # importer JS bundle (high-fidelity)
-foreach(_t ${PROJECT_NAME}-app)
+foreach(_t ${PROJECT_NAME}-app ${PROJECT_NAME}-vst3 ${PROJECT_NAME}-au ${PROJECT_NAME}-clap)
   if(TARGET ${_t})
     target_include_directories(${_t} PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}

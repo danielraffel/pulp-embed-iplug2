@@ -76,6 +76,14 @@ public:
     // the host can track/resize the editor view.
     void* nativeHandle() const { return view_ ? pulp_embed_native_handle(view_) : nullptr; }
 
+    // Host-parents mode (B): the host (e.g. AUv2's Cocoa view factory) parents
+    // Pulp's child NSView itself. Once that child is in a live window hierarchy,
+    // call this to fire Pulp's view-opened lifecycle. Returns true once attached;
+    // poll from tick() until it succeeds (the host may parent a frame later).
+    bool notifyAttached() {
+        return view_ && pulp_embed_notify_attached(view_) == PULP_EMBED_OK;
+    }
+
     // Verification helpers. writeCapturePng grabs the LIVE GPU back buffer (the
     // on-screen surface); writeRenderPng is the deterministic Skia raster.
     bool writeCapturePng(const char* path) {
