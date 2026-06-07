@@ -1,3 +1,8 @@
+// PulpEmbedIPlug SWELL dialog resource (macOS standalone app preferences).
+//
+// Derived from iPlug2's Examples/IPlugEffect template (WDL license; see
+// NOTICE.md). The audio/MIDI preferences dialog is the iPlug2 standalone's
+// device picker, kept as-is; PulpEmbedIPlug's own UI is the embedded Pulp view.
 #ifndef SWELL_DLG_SCALE_AUTOGEN
 #ifdef __APPLE__
   #define SWELL_DLG_SCALE_AUTOGEN 1.7

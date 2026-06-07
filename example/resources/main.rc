@@ -1,5 +1,10 @@
-// Microsoft Visual C++ generated resource script.
+// PulpEmbedIPlug Win32/SWELL resource script.
 //
+// Derived from iPlug2's Examples/IPlugEffect template (WDL license; see
+// NOTICE.md). Relabeled for PulpEmbedIPlug: company/copyright, version, menu.
+// The IGraphics-only debug items (live edit / show-bounds / show-drawn / FPS)
+// were dropped because this example builds UI NONE — the editor IS the embedded
+// Pulp native view, so there is no IGraphics surface to inspect.
 #include "resource.h"
 
 #define APSTUDIO_READONLY_SYMBOLS
@@ -84,19 +89,9 @@ BEGIN
         MENUITEM "&Preferences...\tCtrl+,",     ID_PREFERENCES
         MENUITEM "&Quit",                       ID_QUIT
     END
-    POPUP "&Debug"
-    BEGIN
-        MENUITEM "&Live Edit Mode\tCtrl+E",     ID_LIVE_EDIT
-        MENUITEM "&Show Control Bounds\tCtrl+B", ID_SHOW_BOUNDS
-        MENUITEM "&Show Drawn Area\tCtrl+D",    ID_SHOW_DRAWN
-        MENUITEM "&Show FPS\tCtrl+F",           ID_SHOW_FPS
-        MENUITEM SEPARATOR
-        MENUITEM "&Save Screenshot\tCtrl+Shift+S", ID_SCREENSHOT
-    END
     POPUP "&Help"
     BEGIN
         MENUITEM "&About",                      ID_ABOUT
-        MENUITEM "&Read Manual",                ID_HELP
     END
 END
 
@@ -174,11 +169,6 @@ IDI_ICON1               ICON                    "PulpEmbedIPlug.ico"
 IDR_ACCELERATOR1 ACCELERATORS
 BEGIN
     VK_OEM_COMMA,   ID_PREFERENCES,         VIRTKEY, CONTROL, NOINVERT
-    "B",            ID_SHOW_BOUNDS,         VIRTKEY, CONTROL, NOINVERT
-    "D",            ID_SHOW_DRAWN,          VIRTKEY, CONTROL, NOINVERT
-    "F",            ID_SHOW_FPS,            VIRTKEY, CONTROL, NOINVERT
-    "E",            ID_LIVE_EDIT,           VIRTKEY, CONTROL, NOINVERT
-    "S",            ID_SCREENSHOT,          VIRTKEY, CONTROL, SHIFT, NOINVERT
 END
 
 /////////////////////////////////////////////////////////////////////////////
@@ -189,8 +179,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 0,0,1,0
-PRODUCTVERSION 0,0,1,0
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -205,13 +195,13 @@ BEGIN
     BEGIN
         BLOCK "040004e4"
         BEGIN
-            VALUE "FileVersion", "0.0.1"
-            VALUE "ProductVersion", "0.0.1"
+            VALUE "FileVersion", "0.1.0"
+            VALUE "ProductVersion", "0.1.0"
             VALUE "FileDescription", "PulpEmbedIPlug"
             VALUE "InternalName", "PulpEmbedIPlug"
             VALUE "ProductName", "PulpEmbedIPlug"
-            VALUE "CompanyName", "AcmeInc"
-            VALUE "LegalCopyright", "Copyright 2020 Acme Inc"
+            VALUE "CompanyName", "Pulp"
+            VALUE "LegalCopyright", "Copyright 2026 Pulp"
             VALUE "LegalTrademarks", "VST is a trademark of Steinberg Media Technologies GmbH, Audio Unit is a trademark of Apple, Inc."
         END
     END

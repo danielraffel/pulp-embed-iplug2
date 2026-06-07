@@ -1,6 +1,13 @@
 //{{NO_DEPENDENCIES}}
-// Microsoft Visual C++ generated include file.
-// Used by main.rc
+// PulpEmbedIPlug resource ids. Used by main.rc / main.rc_mac_dlg /
+// main.rc_mac_menu.
+//
+// Derived from iPlug2's Examples/IPlugEffect template (WDL license; see
+// NOTICE.md). The audio/MIDI preference ids (IDC_COMBO_AUDIO_*, IDC_COMBO_MIDI_*)
+// and the ID_LIVE_EDIT / ID_SHOW_* / ID_SCREENSHOT / ID_HELP ids are referenced
+// by iPlug2's standalone APP framework (IPlugAPP_main.cpp / IPlugAPP_dialog.cpp),
+// so they are kept even though PulpEmbedIPlug's trimmed menu no longer exposes
+// the IGraphics-only debug commands (this example builds UI NONE).
 
 #define IDR_ACCELERATOR1                40000
 #define IDD_DIALOG_MAIN                 40001
