@@ -15,6 +15,7 @@
 
 #include <pulp_view_embed.h>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -45,6 +46,15 @@ public:
             pulp_embed_create_from_ui_bundle(&d, path_.c_str(), &view_);
         else
             pulp_embed_create_from_design_json(&d, path_.c_str(), &view_);
+
+        // Dev hot-reload: for a bundle, remember its ui.js and auto-enable the
+        // watcher when PULP_EMBED_HOT_RELOAD is set in the environment.
+        if (is_bundle) {
+            const std::filesystem::path p(path_);
+            watch_file_ = std::filesystem::is_directory(p, ec) ? (p / "ui.js") : p;
+            if (std::getenv("PULP_EMBED_HOT_RELOAD") != nullptr)
+                enableBundleHotReload(true);
+        }
     }
 
     ~PulpEmbedEditor() {
@@ -109,9 +119,43 @@ public:
         if (view_) pulp_embed_resize(view_, w, h, scale > 0.0f ? scale : 1.0f);
     }
 
-    void tick() { if (view_) pulp_embed_tick(view_); }
+    void tick() {
+        if (!view_) return;
+        pulp_embed_tick(view_);
+        pollHotReload();
+    }
+
+    // Dev hot-reload watcher: poll the bundle's ui.js mtime on tick() and call
+    // pulp_embed_reload_bundle when it changes (debounced one tick vs a mid-write
+    // save). Editing the bundle reloads the open editor live — no DAW reload.
+    // Bundle path only; auto-enabled when PULP_EMBED_HOT_RELOAD is set. Ship off
+    // in release builds (it's a developer loop).
+    void enableBundleHotReload(bool enable = true) {
+        std::error_code ec;
+        watch_ = enable && !watch_file_.empty() &&
+                 std::filesystem::exists(watch_file_, ec);
+        if (watch_) last_write_ = pending_write_ = mtime();
+    }
 
 private:
+    std::filesystem::file_time_type mtime() const {
+        std::error_code ec;
+        auto t = std::filesystem::last_write_time(watch_file_, ec);
+        return ec ? std::filesystem::file_time_type{} : t;
+    }
+    void pollHotReload() {
+        if (!watch_ || !view_) return;
+        const auto m = mtime();
+        if (m != last_write_) {
+            // Apply only once the mtime has been stable for a tick (debounce);
+            // reload_bundle is probe-first/last-good, so a bad edit is safe.
+            if (m == pending_write_ &&
+                pulp_embed_reload_bundle(view_, nullptr) == PULP_EMBED_OK)
+                last_write_ = m;
+            pending_write_ = m;
+        }
+    }
+
     static bool write_file(const char* path, const std::vector<uint8_t>& b) {
         if (b.empty()) return false;
         FILE* f = std::fopen(path, "wb");
@@ -123,6 +167,12 @@ private:
     std::string path_;
     int w_ = 0, h_ = 0;
     PulpEmbedView* view_ = nullptr;
+
+    // Dev hot-reload watcher state (bundle path only).
+    bool watch_ = false;
+    std::filesystem::path watch_file_;
+    std::filesystem::file_time_type last_write_{};
+    std::filesystem::file_time_type pending_write_{};
 };
 
 }  // namespace pulp_iplug2
