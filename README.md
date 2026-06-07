@@ -55,6 +55,31 @@ compositing (currently CPU RGBA readback for the offscreen path).
 Third-party attribution for the borrowed iPlug2 IPlugEffect resource files is in
 [`NOTICE.md`](NOTICE.md).
 
+## What gets embedded (FAQ)
+
+- **What shows up in your editor?** One rendered native child view — the
+  imported design, drawn by Pulp — parented into the window iPlug2 hands you on
+  open (`UI NONE`: the editor *is* the embedded design).
+- **Which designs?** Anything `pulp import-design` can import: **Figma, Claude
+  Design, Stitch, v0, Pencil, React Native** (it consumes the importer's
+  `--emit js` bundle or `--emit ir-json`, not the design tool directly). Pulp's
+  layout is **flex + grid only**, so CSS block/float/table/multi-column designs
+  are out of scope by design.
+- **GPU or CPU?** GPU by default (Dawn/Metal + Skia Graphite); CPU raster
+  fallback when the GPU stack is absent. The example plugin renders on GPU.
+- **JS engine?** Only on the high-fidelity bundle path (Pulp's QuickJS scripted
+  UI — that's what makes it pixel-match the importer). The lightweight DesignIR
+  path uses native widgets, no JS.
+- **Skia/Dawn or just C++?** Your plugin statically links the Pulp SDK, which
+  brings Skia + Dawn transitively (tens of MB) — but **no Pulp C++ type enters
+  your iPlug2 translation units**; you include only `pulp_view_embed.h` (C).
+- **Changing the UX later?** Re-run the importer and ship a new bundle (no C++
+  edits); bind controls to iPlug2 `IParam`s by string key via the ABI v3 param
+  bridge to make them interactive.
+
+Full architecture + supported-imports table + roadmap:
+[`pulp-view-embed` README](../pulp-view-embed#what-you-actually-get-plain-english-faq).
+
 ## How it embeds
 
 iPlug2 hands the editor a parent native window/view on open. There are two
