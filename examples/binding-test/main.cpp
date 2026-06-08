@@ -23,6 +23,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,6 +68,29 @@ struct FakeDelegate {
     void SendParameterValueFromUI(int i, double n) {
         sets.emplace_back(i, n);
         if (auto* p = GetParam(i)) p->SetNormalized(n);
+    }
+};
+
+// Records the ABI v6 string-bridge host callbacks (text_field <-> host state).
+struct StringHost {
+    std::vector<std::pair<std::string, std::string>> sets;  // set_string calls
+    std::map<std::string, std::string> store;               // backs get_string
+    static void cSet(void* ctx, const char* key, const char* utf8) {
+        auto* h = static_cast<StringHost*>(ctx);
+        h->sets.emplace_back(key, utf8 ? utf8 : "");
+        h->store[key] = utf8 ? utf8 : "";
+    }
+    static int32_t cGet(void* ctx, const char* key, char* out, int32_t cap) {
+        auto* h = static_cast<StringHost*>(ctx);
+        const auto it = h->store.find(key);
+        if (it == h->store.end()) return -1;
+        const int32_t n = static_cast<int32_t>(it->second.size());
+        if (out && cap > 0) {
+            const int32_t c = n < cap - 1 ? n : cap - 1;
+            std::memcpy(out, it->second.data(), static_cast<size_t>(c));
+            out[c] = '\0';
+        }
+        return n;
     }
 };
 
@@ -269,6 +294,59 @@ int main() {
                 sdps[i].is_discrete != dps[i].is_discrete)
                 same = false;
         check(same, "offscreen readDesignParams() matches the editor's designParams()");
+    }
+
+    // ── ABI v6 text-field string bridge (raw ABI: a text_field binds to host
+    //    string STATE, separate from the numeric param bridge). ──────────────
+    {
+        StringHost sh;
+        PulpEmbedDesc d{};
+        d.struct_size = sizeof(PulpEmbedDesc);
+        d.abi_version = PULP_VIEW_EMBED_ABI_VERSION;
+        d.logical_width = W;
+        d.logical_height = H;
+        d.scale_factor = 1.0f;
+        d.backend_pref = PULP_EMBED_BACKEND_PREF_AUTO;
+        d.design_width = W;
+        d.design_height = H;
+        d.host_ctx = &sh;
+        d.host.set_string = &StringHost::cSet;
+        d.host.get_string = &StringHost::cGet;
+        PulpEmbedView* v = nullptr;
+        pulp_embed_create_from_design_json(&d, ir.c_str(), &v);
+        check(v != nullptr, "create with string host callbacks");
+        if (v) {
+            const int sc = pulp_embed_string_param_count(v);
+            check(sc >= 1, "design exposes >= 1 text_field string param");
+            char skey[256] = {0};
+            pulp_embed_string_param_key(v, 0, skey, sizeof skey);
+            check(skey[0] != '\0', "string param key is non-empty");
+
+            // UI -> host: a simulated user edit fires host.set_string.
+            check(pulp_embed_simulate_text_input(v, 0, "Hello") == PULP_EMBED_OK,
+                  "simulate_text_input OK");
+            check(!sh.sets.empty() && sh.sets.back().second == "Hello",
+                  "host.set_string saw the user edit");
+            char gv[256] = {0};
+            pulp_embed_get_string(v, skey, gv, sizeof gv);
+            check(std::string(gv) == "Hello", "get_string reflects the edit");
+
+            // host -> view: push without echoing back to host.set_string.
+            const size_t before = sh.sets.size();
+            check(pulp_embed_set_string(v, skey, "World") == PULP_EMBED_OK, "set_string OK");
+            char gv2[256] = {0};
+            pulp_embed_get_string(v, skey, gv2, sizeof gv2);
+            check(std::string(gv2) == "World", "field reflects the host-pushed string");
+            check(sh.sets.size() == before,
+                  "host->view set_string did NOT echo back to host.set_string (no loop)");
+
+            // unknown key tolerated (blind push); out-of-range simulate rejected.
+            check(pulp_embed_set_string(v, "no_such_text", "x") == PULP_EMBED_OK,
+                  "set_string(unknown key) is a tolerated no-op");
+            check(pulp_embed_simulate_text_input(v, 9999, "x") == PULP_EMBED_ERR_INVALID_ARG,
+                  "simulate_text_input rejects an out-of-range index");
+            pulp_embed_destroy(v);
+        }
     }
 
     std::printf("%s\n", g_failures == 0 ? "pulp-embed-iplug2 binding-test OK"
