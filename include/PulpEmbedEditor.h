@@ -14,6 +14,7 @@
 #pragma once
 
 #include <pulp_view_embed.h>
+#include <pulp_view_embed.hpp>  // pulp::embed::ParamDesc + param_descs/read_design_params
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -200,21 +201,11 @@ public:
     PulpEmbedView* view() const { return view_; }
 
     // One design control's parameter description (ABI v5 metadata), for a
-    // GREENFIELD plugin that wants to BUILD its IParams from the design instead
-    // of declaring them by hand. `key` is the bind key (pass it back as the
-    // design-key in the binding ctor's key->paramIdx map). `is_discrete` +
-    // `option_count` say whether to InitEnum/InitBool vs InitDouble; `default_norm`
-    // is the imported default [0,1]. `name`/`unit` are populated once the importer
-    // carries them (empty until then — fall back to `key`).
-    struct DesignParamDesc {
-        std::string key;
-        std::string widget_kind;   // "knob"/"fader"/"toggle"/"dropdown"/"tab_group"/"stepper"
-        bool        is_discrete = false;
-        int         option_count = 0;
-        double      default_norm = 0.0;
-        std::string name;          // "" until imported
-        std::string unit;          // "" until imported
-    };
+    // GREENFIELD plugin that wants to BUILD its IParams from the design. Shared,
+    // framework-neutral type from pulp_view_embed.hpp: { key, widget_kind,
+    // is_discrete, option_count, default_norm, name, unit }. `name`/`unit` are
+    // populated once the importer carries them (else empty — fall back to `key`).
+    using DesignParamDesc = pulp::embed::ParamDesc;
 
     // Enumerate the design's bindable controls as parameter descriptors, in the
     // stable ABI index order. A greenfield plugin iterates these to init its
@@ -230,38 +221,22 @@ public:
     // (Ranges are normalized [0,1] today; real units arrive with the importer
     // metadata slice. The plugin still owns the IParam objects.)
     std::vector<DesignParamDesc> designParams() const {
-        return descsForView(view_);
+        return pulp::embed::param_descs(view_);
     }
 
     // Static greenfield entry point: read a design's parameter descriptors WITHOUT
     // an editor/window, so a plugin can declare its IParams at CONSTRUCTION time
     // (before any editor exists) directly from the design. Builds an OFFSCREEN
-    // view (no parent, no display-link — pulp_embed_create_offscreen), enumerates,
-    // and tears it down. `source` is a bundle dir (ui.js) or a DesignIR JSON file
-    // — auto-detected. Empty vector if the design can't be opened.
+    // view, enumerates, tears it down. `source` is a bundle dir (ui.js) or a
+    // DesignIR JSON file — auto-detected. Empty vector if it can't be opened.
     static std::vector<DesignParamDesc> readDesignParams(const std::string& source,
                                                          int logicalWidth,
                                                          int logicalHeight) {
-        PulpEmbedDesc d{};
-        d.struct_size = sizeof(PulpEmbedDesc);
-        d.abi_version = PULP_VIEW_EMBED_ABI_VERSION;
-        d.logical_width = logicalWidth;
-        d.logical_height = logicalHeight;
-        d.scale_factor = 1.0f;
-        d.backend_pref = PULP_EMBED_BACKEND_PREF_AUTO;
-        d.design_width = logicalWidth;
-        d.design_height = logicalHeight;
         std::error_code ec;
         const bool is_bundle =
             std::filesystem::is_directory(source, ec) ||
             std::filesystem::exists(std::filesystem::path(source) / "ui.js", ec);
-        PulpEmbedView* v = nullptr;
-        if (pulp_embed_create_offscreen(&d, source.c_str(), is_bundle ? 1 : 0, &v) != PULP_EMBED_OK
-            || v == nullptr)
-            return {};
-        auto out = descsForView(v);
-        pulp_embed_destroy(v);
-        return out;
+        return pulp::embed::read_design_params(source, is_bundle, logicalWidth, logicalHeight);
     }
 
     // Host-parents mode (B): the host (e.g. AUv2's Cocoa view factory) parents
@@ -324,28 +299,6 @@ public:
     }
 
 private:
-    // Extract per-control descriptors from any view (instance or offscreen).
-    static std::vector<DesignParamDesc> descsForView(PulpEmbedView* v) {
-        std::vector<DesignParamDesc> out;
-        if (!v) return out;
-        const int n = pulp_embed_param_count(v);
-        for (int i = 0; i < n; ++i) {
-            PulpEmbedParamInfo pi{};
-            if (pulp_embed_param_info(v, i, &pi) != PULP_EMBED_OK) continue;
-            DesignParamDesc d;
-            char key[256] = {0};
-            pulp_embed_param_key(v, i, key, sizeof key);
-            d.key = key;
-            d.widget_kind = pi.widget_kind;
-            d.is_discrete = pi.is_discrete != 0;
-            d.option_count = pi.option_count;
-            d.default_norm = pi.default_norm;
-            if (pi.has_meta) { d.name = pi.name; d.unit = pi.unit; }
-            out.push_back(std::move(d));
-        }
-        return out;
-    }
-
     // Shared construction body: build the desc (wiring the host bridge when
     // bridge_ is set — the callbacks must be in the desc at create time, since
     // host_ctx is captured then), create the view from a bundle dir or DesignIR
