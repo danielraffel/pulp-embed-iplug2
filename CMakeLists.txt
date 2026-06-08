@@ -48,3 +48,12 @@ if(APPLE)
     target_link_libraries(pulp-embed-iplug2-binding-test PRIVATE "-framework AppKit")
 endif()
 add_test(NAME binding-test COMMAND pulp-embed-iplug2-binding-test)
+
+# Linux: re-mention fontconfig AFTER libskia.a on each Skia-linking executable
+# (single-pass GNU ld; the Skia archive references Fc* symbols). The helper is
+# exposed by the Pulp SDK's PulpConfig (loaded via the pulp-view-embed subdir's
+# find_package(Pulp)); COMMAND-guarded for older SDKs / non-Linux.
+if(UNIX AND NOT APPLE AND NOT ANDROID AND COMMAND pulp_link_fontconfig_after_skia)
+    pulp_link_fontconfig_after_skia(pulp-embed-iplug2-compilecheck)
+    pulp_link_fontconfig_after_skia(pulp-embed-iplug2-binding-test)
+endif()
