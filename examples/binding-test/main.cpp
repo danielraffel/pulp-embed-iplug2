@@ -257,6 +257,18 @@ int main() {
         check(keys_ok && kinds_ok, "every descriptor carries a key + widget_kind");
         check(dp_knobs > 0 && dp_discrete > 0,
               "descriptors include continuous knobs AND discrete controls (greenfield init)");
+
+        // Static greenfield reader: same descriptors WITHOUT an editor (offscreen),
+        // so a plugin can declare IParams at construction time.
+        const auto sdps = pulp_iplug2::PulpEmbedEditor::readDesignParams(ir, W, H);
+        check(sdps.size() == dps.size(),
+              "readDesignParams() (offscreen, no editor) returns the same count");
+        bool same = sdps.size() == dps.size();
+        for (size_t i = 0; same && i < sdps.size(); ++i)
+            if (sdps[i].key != dps[i].key || sdps[i].widget_kind != dps[i].widget_kind ||
+                sdps[i].is_discrete != dps[i].is_discrete)
+                same = false;
+        check(same, "offscreen readDesignParams() matches the editor's designParams()");
     }
 
     std::printf("%s\n", g_failures == 0 ? "pulp-embed-iplug2 binding-test OK"
