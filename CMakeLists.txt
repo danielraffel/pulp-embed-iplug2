@@ -36,3 +36,15 @@ if(APPLE)
     target_link_libraries(pulp-embed-iplug2-compilecheck PRIVATE "-framework AppKit")
 endif()
 add_test(NAME compilecheck COMMAND pulp-embed-iplug2-compilecheck)
+
+# Param-bridge binding test: drives PulpEmbedEditor's host bridge with a fake
+# (duck-typed) iPlug2 delegate against a real materialized design — proves the
+# adapter wires the C ABI param bridge to the delegate WITHOUT the iPlug2 SDK.
+add_executable(pulp-embed-iplug2-binding-test examples/binding-test/main.cpp)
+target_link_libraries(pulp-embed-iplug2-binding-test PRIVATE pulp_embed_iplug2)
+target_compile_definitions(pulp-embed-iplug2-binding-test
+    PRIVATE PULP_EMBED_FIXTURES_DIR="${PULP_VIEW_EMBED_DIR}/fixtures")
+if(APPLE)
+    target_link_libraries(pulp-embed-iplug2-binding-test PRIVATE "-framework AppKit")
+endif()
+add_test(NAME binding-test COMMAND pulp-embed-iplug2-binding-test)

@@ -23,9 +23,15 @@ Figma frame) in an iPlug2 plugin's editor.
   the embedded Pulp design (`UI NONE`), at full fidelity (importer JS bundle).
 - Both parenting paths: pulp-parents (APP/VST3/CLAP) and host-parents
   (AUv2 Cocoa view factory).
-- **Interactive parameters (ABI v3):** design controls bind by string key to
-  iPlug2 `IParam`s — a dragged control writes the host param; host automation
-  pushes values back. iPlug2 maps its own params to the design's keys.
+- **Interactive parameters (ABI v2 param bridge):** construct `PulpEmbedEditor`
+  with the plugin delegate and a design-key → `IParam` index map, and design
+  controls bind **bidirectionally** — a dragged control writes the host param
+  (`Begin`/`SendParameterValueFromUI`/`End`); host automation / preset recall
+  pushes values back into the control (polled on the timer tick). Unlike JUCE
+  (string `paramID`), iPlug2 params are integer-indexed, so the plugin supplies
+  the key → index map (with an optional case-insensitive `IParam::GetName()`
+  fallback). Unmatched controls stay visual-only; `boundParameterCount()` reports
+  how many resolved. See *Interactive parameters* below.
 - Offscreen render mode, `resolve_resource` host asset callback, and bundled
   fonts all flow through the same C ABI.
 - Headless self-check (`PULP_EMBED_SELFCHECK=1`) proves the editor renders +
@@ -46,8 +52,10 @@ Figma frame) in an iPlug2 plugin's editor.
 
 - *Event-loop tick* — borrowed from the host: the iPlug2 editor's UI timer (and
   Pulp's GPU display-link) drives `pulp_embed_tick`; the adapter runs no loop.
-- *Parameter model* — string-key based, which maps cleanly onto iPlug2's
-  `IParam` (the plugin owns the param objects and binds each to a design key).
+- *Parameter model* — the plugin owns the `IParam` objects and binds each to a
+  design control key. The C ABI bridge is string-keyed; because iPlug2 params are
+  integer-indexed (no native string id), the plugin passes a small key → param
+  index map (or relies on the `IParam::GetName()` fallback).
 
 **Roadmap:** Windows host; real-DAW automation/state validation; zero-copy GPU
 compositing (currently CPU RGBA readback for the offscreen path).
@@ -142,6 +150,43 @@ embed_.close();
 
 No Pulp C++ type appears in your iPlug2 translation units — only
 `pulp_view_embed.h`.
+
+## Interactive parameters
+
+Bind the embedded design's controls to your plugin's `IParam`s so a dragged knob
+writes the host parameter (with begin/end gesture grouping) and host automation /
+preset recall moves the control. Construct the editor with the plugin delegate and
+a design-key → param-index map:
+
+```cpp
+#include "PulpEmbedEditor.h"
+
+enum EParams { kGain = 0, kMix, kNumParams };
+
+// in your plugin ctor (iplug::Plugin IS an IEditorDelegate):
+GetParam(kGain)->InitDouble("Gain", 80.0, 0.0, 100.0, 0.01, "%");
+GetParam(kMix)->InitDouble("Dry/Wet", 100.0, 0.0, 100.0, 0.01, "%");
+
+// when you create the editor (e.g. in OpenWindow), pass *this + the key map:
+mEmbed = std::make_unique<pulp_iplug2::PulpEmbedEditor>(
+    designPath, kW, kH, *this,
+    /* design key -> paramIdx */ { {"gain", kGain}, {"mix", kMix} });
+// mEmbed->boundParameterCount() -> how many design controls resolved (here up to 2).
+```
+
+The bind key is the design control's `pulpParamKey` (else its widget id). Pass
+`nameFallback=true` (the default) to also match a design key against
+`IParam::GetName()` when it has no explicit map entry; explicit entries always win,
+and an explicit index past `NParams()` is ignored (never fires on an invalid param).
+Controls with no match stay visual-only. The host→UI direction is pumped from
+`tick()`, so keep calling `editor.tick()` from your UI timer (you already do). The
+bundled figma demo is visual-only (its control keys don't match any param) → binds
+0; point `PulpEmbedEditor` at a param-keyed design to see a non-zero bind count.
+
+> Internals: the binding is **framework-neutral** — `PulpEmbedEditor.h` names no
+> iPlug2 type, so the compile/link check still builds it without the iPlug2 SDK.
+> The delegate is reached through a type-erased, duck-typed bridge that is only
+> instantiated when this constructor is used inside an iPlug2 translation unit.
 
 ## Build (compile/link check)
 
