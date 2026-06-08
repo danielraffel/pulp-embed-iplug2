@@ -212,6 +212,36 @@ int main() {
               "explicit out-of-range paramIdx is rejected (would fire on an invalid index)");
     }
 
+    // ── ABI v5 param metadata: the design exposes per-control kind/discreteness
+    //    so a host can build a correct param (knobs continuous; the faithful
+    //    fixture also has discrete choice controls with options). ─────────────
+    {
+        pulp_iplug2::PulpEmbedEditor probe(ir, W, H);
+        const int n = pulp_embed_param_count(probe.view());
+        int knobs = 0, discrete_with_options = 0;
+        bool kinds_nonempty = true, defaults_in_range = true, all_ok = (n > 0);
+        for (int i = 0; i < n; ++i) {
+            PulpEmbedParamInfo pi{};
+            if (pulp_embed_param_info(probe.view(), i, &pi) != PULP_EMBED_OK) all_ok = false;
+            if (pi.widget_kind[0] == '\0') kinds_nonempty = false;
+            if (pi.default_norm < 0.0 || pi.default_norm > 1.0) defaults_in_range = false;
+            if (std::string(pi.widget_kind) == "knob" && !pi.is_discrete) ++knobs;
+            if (pi.is_discrete && pi.option_count > 0) ++discrete_with_options;
+        }
+        check(all_ok, "param_info returns OK for every valid index");
+        check(kinds_nonempty, "every control reports a non-empty widget_kind");
+        check(defaults_in_range, "every control's default_norm is within [0,1]");
+        check(knobs > 0, "at least one continuous knob is reported");
+        check(discrete_with_options > 0,
+              "at least one discrete control reports option_count > 0 (dropdown/tab/stepper)");
+        // out-of-range index is rejected + zero-filled
+        PulpEmbedParamInfo bad{};
+        bad.is_discrete = 7;
+        check(pulp_embed_param_info(probe.view(), 99999, &bad) == PULP_EMBED_ERR_INVALID_ARG &&
+                  bad.is_discrete == 0,
+              "param_info rejects an out-of-range index and zero-fills");
+    }
+
     std::printf("%s\n", g_failures == 0 ? "pulp-embed-iplug2 binding-test OK"
                                         : "pulp-embed-iplug2 binding-test FAILED");
     return g_failures == 0 ? 0 : 1;
