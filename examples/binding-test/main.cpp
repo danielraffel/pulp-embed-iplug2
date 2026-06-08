@@ -349,6 +349,55 @@ int main() {
         }
     }
 
+    // ── ABI v6 string bridge through the ADAPTER (PulpEmbedEditor string API:
+    //    live-edit handler + capture/restore round-trip for preset save/load) ──
+    {
+        FakeDelegate d;
+        d.params.push_back({"GAIN", 0.0});
+        // A delegate is present so the string host callbacks are wired (they
+        // share the param bridge's host_ctx). nameFallback off = only the param
+        // bridge's explicit map binds; strings are independent of it.
+        pulp_iplug2::PulpEmbedEditor ed(ir, W, H, d, {{firstKey.c_str(), 0}}, false);
+        check(ed.valid(), "string-adapter editor created");
+
+        const int sc = ed.stringFieldCount();
+        check(sc >= 1, "adapter reports >= 1 text_field string control");
+        if (sc >= 1) {
+            const std::string skey = ed.stringFieldKey(0);
+            check(!skey.empty(), "adapter string field key is non-empty");
+
+            // Live-edit notification: a simulated user edit fires the handler.
+            std::vector<std::pair<std::string, std::string>> edits;
+            ed.setStringChangeHandler(
+                [&](const std::string& k, const std::string& v) { edits.emplace_back(k, v); });
+
+            check(pulp_embed_simulate_text_input(ed.view(), 0, "Hello") == PULP_EMBED_OK,
+                  "adapter: simulate_text_input OK");
+            check(!edits.empty() && edits.back().first == skey && edits.back().second == "Hello",
+                  "adapter: string-change handler saw the live edit");
+            check(ed.stringValue(skey) == "Hello", "adapter: stringValue reflects the edit");
+
+            // captureStringState (SerializeState): snapshot the live view.
+            auto saved = ed.captureStringState();
+            bool captured = false;
+            for (const auto& kv : saved)
+                if (kv.first == skey && kv.second == "Hello") captured = true;
+            check(captured, "adapter: captureStringState snapshots the edited value");
+
+            // restoreStringState (UnserializeState): push without echoing back.
+            const size_t edits_before = edits.size();
+            std::vector<std::pair<std::string, std::string>> preset = {{skey, "World"}};
+            ed.restoreStringState(preset);
+            check(ed.stringValue(skey) == "World", "adapter: restoreStringState recalls the preset");
+            check(edits.size() == edits_before,
+                  "adapter: restore did NOT re-fire the change handler (no echo loop)");
+
+            // Blind restore of an unknown key is tolerated.
+            ed.restoreStringState({{"no_such_text_field", "x"}});
+            check(true, "adapter: restore of an unknown key is a tolerated no-op");
+        }
+    }
+
     std::printf("%s\n", g_failures == 0 ? "pulp-embed-iplug2 binding-test OK"
                                         : "pulp-embed-iplug2 binding-test FAILED");
     return g_failures == 0 ? 0 : 1;

@@ -18,7 +18,9 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -98,6 +100,37 @@ struct HostBridgeBase {
         auto* b = static_cast<HostBridgeBase*>(ctx);
         const int i = b->find_idx(key);
         if (i >= 0) b->end_gesture(i);
+    }
+
+    // ── ABI v6 text-field string bridge (text_field <-> host STATE) ──────────
+    // text_fields carry a string, not a normalized value, so they ride a
+    // separate side-channel. `strings` is the plugin's authoritative string
+    // store (preset name / label / search text) — what the plugin serializes;
+    // `on_string` is an optional live-edit notification (e.g. mark-dirty). The
+    // store is keyed by the text_field's design key. Unlike the numeric bridge,
+    // strings need no delegate resolution — every design key is its own store
+    // slot, so this works for any editor that wires the callbacks.
+    std::unordered_map<std::string, std::string> strings;
+    std::function<void(const std::string&, const std::string&)> on_string;
+
+    static void cSetString(void* ctx, const char* key, const char* utf8) {
+        auto* b = static_cast<HostBridgeBase*>(ctx);
+        const std::string k = key ? key : "";
+        const std::string v = utf8 ? utf8 : "";
+        b->strings[k] = v;
+        if (b->on_string) b->on_string(k, v);
+    }
+    static int32_t cGetString(void* ctx, const char* key, char* out, int32_t cap) {
+        auto* b = static_cast<HostBridgeBase*>(ctx);
+        const auto it = b->strings.find(key ? key : "");
+        if (it == b->strings.end()) return -1;  // no host opinion: keep imported default
+        const int32_t n = static_cast<int32_t>(it->second.size());
+        if (out && cap > 0) {
+            const int32_t c = n < cap - 1 ? n : cap - 1;
+            std::memcpy(out, it->second.data(), static_cast<size_t>(c));
+            out[c] = '\0';
+        }
+        return n;
     }
 };
 
@@ -286,6 +319,72 @@ public:
         return bridge_ ? static_cast<int>(bridge_->bound.size()) : 0;
     }
 
+    // ── text-field string state (ABI v6) ───────────────────────────────────
+    // A design's text_field controls carry a UTF-8 string bound to the plugin's
+    // OWN state (preset name / label / search text) — saved/restored with the
+    // plugin, NOT a DAW-automatable parameter. These methods read/write that
+    // state directly on the live view, so they work whether or not the editor
+    // was given a numeric-param delegate. Use captureStringState() at
+    // SerializeState time and restoreStringState() at UnserializeState time.
+
+    // Number of bindable text_field string controls in the design.
+    int stringFieldCount() const {
+        return view_ ? pulp_embed_string_param_count(view_) : 0;
+    }
+
+    // The string control's design key at `index` (empty if out of range).
+    std::string stringFieldKey(int index) const {
+        char buf[256] = {0};
+        if (view_) pulp_embed_string_param_key(view_, index, buf, sizeof buf);
+        return buf;
+    }
+
+    // Current UTF-8 text of the string control identified by `key` (empty if the
+    // key is unknown). Sized two-call so arbitrarily long values round-trip.
+    std::string stringValue(const std::string& key) const {
+        if (!view_) return {};
+        const size_t need = pulp_embed_get_string(view_, key.c_str(), nullptr, 0);
+        std::string out(need, '\0');
+        if (need) pulp_embed_get_string(view_, key.c_str(), out.data(), need + 1);
+        return out;
+    }
+
+    // Host -> view: set the text of the string control identified by `key`
+    // (preset recall). A no-op (returns true) for a key that matches no
+    // text_field, so a blind restore is safe.
+    bool setStringValue(const std::string& key, const std::string& value) {
+        return view_ &&
+               pulp_embed_set_string(view_, key.c_str(), value.c_str()) == PULP_EMBED_OK;
+    }
+
+    // Snapshot every text_field's (key, value) for SerializeState. Reads the live
+    // view, so it reflects in-editor edits even without a host callback wired.
+    std::vector<std::pair<std::string, std::string>> captureStringState() const {
+        std::vector<std::pair<std::string, std::string>> out;
+        const int n = stringFieldCount();
+        out.reserve(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            std::string k = stringFieldKey(i);
+            out.emplace_back(k, stringValue(k));
+        }
+        return out;
+    }
+
+    // Restore a snapshot from UnserializeState. Pushes each value host -> view
+    // without echoing back through the set_string callback (no edit loop).
+    void restoreStringState(const std::vector<std::pair<std::string, std::string>>& state) {
+        for (const auto& kv : state) setStringValue(kv.first, kv.second);
+    }
+
+    // Optional live-edit notification: invoked (with key, new UTF-8 value)
+    // whenever the user edits a text_field, so the plugin can mark its state
+    // dirty. Only fires when the editor was constructed with a delegate (the
+    // string host callbacks share that bridge's host_ctx). The captured value is
+    // also kept in the bridge's string store.
+    void setStringChangeHandler(std::function<void(const std::string&, const std::string&)> fn) {
+        if (bridge_) bridge_->on_string = std::move(fn);
+    }
+
     // Dev hot-reload watcher: poll the bundle's ui.js mtime on tick() and call
     // pulp_embed_reload_bundle when it changes (debounced one tick vs a mid-write
     // save). Editing the bundle reloads the open editor live — no DAW reload.
@@ -319,6 +418,11 @@ private:
             d.host.get_param = &HostBridgeBase::cGet;
             d.host.begin_gesture = &HostBridgeBase::cBegin;
             d.host.end_gesture = &HostBridgeBase::cEnd;
+            // ABI v6 string side-channel (text_field <-> host state). Shares the
+            // bridge's host_ctx; get_string seeds from bridge_->strings (empty =
+            // keep imported default) so a preset can be pre-loaded before create.
+            d.host.set_string = &HostBridgeBase::cSetString;
+            d.host.get_string = &HostBridgeBase::cGetString;
         }
         std::error_code ec;
         const bool is_bundle =
