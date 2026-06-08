@@ -188,6 +188,33 @@ bundled figma demo is visual-only (its control keys don't match any param) → b
 > The delegate is reached through a type-erased, duck-typed bridge that is only
 > instantiated when this constructor is used inside an iPlug2 translation unit.
 
+### Greenfield: build IParams from the design
+
+A new/thin plugin can let the design DEFINE its parameters instead of declaring
+them by hand. `editor.designParams()` returns one descriptor per bindable control
+(key, widget kind, discreteness, option count, default, and name/unit once the
+importer carries them — ABI v5 metadata). Iterate it to init your `IParam`s and
+build the key→index map in one pass:
+
+```cpp
+std::vector<std::pair<const char*, int>> keyMap;
+int idx = 0;
+for (auto& p : editor.designParams()) {
+    const char* nm = p.name.empty() ? p.key.c_str() : p.name.c_str();
+    if (p.is_discrete)
+        GetParam(idx)->InitEnum(nm, 0, std::max(2, p.option_count));
+    else
+        GetParam(idx)->InitDouble(nm, p.default_norm * 100.0, 0.0, 100.0, 0.01, p.unit.c_str());
+    keyMap.push_back({p.key.c_str(), idx++});
+}
+// then construct the editor's interactive ctor with keyMap.
+```
+
+Ranges are normalized [0,1] today; real units/ranges arrive with the importer
+metadata slice. The plugin still owns the `IParam` objects (the host stays
+authoritative); for an EXISTING plugin keep declaring params by hand and just map
+keys, with `designParams()` as a cross-check.
+
 ## Build (compile/link check)
 
 ```bash

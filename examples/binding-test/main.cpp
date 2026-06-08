@@ -240,6 +240,23 @@ int main() {
         check(pulp_embed_param_info(probe.view(), 99999, &bad) == PULP_EMBED_ERR_INVALID_ARG &&
                   bad.is_discrete == 0,
               "param_info rejects an out-of-range index and zero-fills");
+
+        // Greenfield helper: designParams() mirrors the ABI metadata as
+        // ready-to-init descriptors a plugin builds IParams from.
+        const auto dps = probe.designParams();
+        check(static_cast<int>(dps.size()) == n,
+              "designParams() returns one descriptor per bindable control");
+        bool keys_ok = true, kinds_ok = true;
+        int dp_discrete = 0, dp_knobs = 0;
+        for (const auto& d : dps) {
+            if (d.key.empty()) keys_ok = false;
+            if (d.widget_kind.empty()) kinds_ok = false;
+            if (d.is_discrete && d.option_count > 0) ++dp_discrete;
+            if (d.widget_kind == "knob" && !d.is_discrete) ++dp_knobs;
+        }
+        check(keys_ok && kinds_ok, "every descriptor carries a key + widget_kind");
+        check(dp_knobs > 0 && dp_discrete > 0,
+              "descriptors include continuous knobs AND discrete controls (greenfield init)");
     }
 
     std::printf("%s\n", g_failures == 0 ? "pulp-embed-iplug2 binding-test OK"

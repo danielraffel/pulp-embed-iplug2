@@ -199,6 +199,57 @@ public:
     // editor — do NOT destroy it. NULL before creation succeeds.
     PulpEmbedView* view() const { return view_; }
 
+    // One design control's parameter description (ABI v5 metadata), for a
+    // GREENFIELD plugin that wants to BUILD its IParams from the design instead
+    // of declaring them by hand. `key` is the bind key (pass it back as the
+    // design-key in the binding ctor's key->paramIdx map). `is_discrete` +
+    // `option_count` say whether to InitEnum/InitBool vs InitDouble; `default_norm`
+    // is the imported default [0,1]. `name`/`unit` are populated once the importer
+    // carries them (empty until then — fall back to `key`).
+    struct DesignParamDesc {
+        std::string key;
+        std::string widget_kind;   // "knob"/"fader"/"toggle"/"dropdown"/"tab_group"/"stepper"
+        bool        is_discrete = false;
+        int         option_count = 0;
+        double      default_norm = 0.0;
+        std::string name;          // "" until imported
+        std::string unit;          // "" until imported
+    };
+
+    // Enumerate the design's bindable controls as parameter descriptors, in the
+    // stable ABI index order. A greenfield plugin iterates these to init its
+    // IParams, e.g.:
+    //   int idx = 0;
+    //   for (auto& p : editor.designParams()) {
+    //     const char* nm = p.name.empty() ? p.key.c_str() : p.name.c_str();
+    //     if (p.is_discrete) GetParam(idx)->InitEnum(nm, 0, std::max(2, p.option_count));
+    //     else GetParam(idx)->InitDouble(nm, p.default_norm * 100.0, 0, 100, 0.01,
+    //                                    p.unit.c_str());
+    //     keyMap.push_back({p.key.c_str(), idx++});   // feed the binding ctor
+    //   }
+    // (Ranges are normalized [0,1] today; real units arrive with the importer
+    // metadata slice. The plugin still owns the IParam objects.)
+    std::vector<DesignParamDesc> designParams() const {
+        std::vector<DesignParamDesc> out;
+        if (!view_) return out;
+        const int n = pulp_embed_param_count(view_);
+        for (int i = 0; i < n; ++i) {
+            PulpEmbedParamInfo pi{};
+            if (pulp_embed_param_info(view_, i, &pi) != PULP_EMBED_OK) continue;
+            DesignParamDesc d;
+            char key[256] = {0};
+            pulp_embed_param_key(view_, i, key, sizeof key);
+            d.key = key;
+            d.widget_kind = pi.widget_kind;
+            d.is_discrete = pi.is_discrete != 0;
+            d.option_count = pi.option_count;
+            d.default_norm = pi.default_norm;
+            if (pi.has_meta) { d.name = pi.name; d.unit = pi.unit; }
+            out.push_back(std::move(d));
+        }
+        return out;
+    }
+
     // Host-parents mode (B): the host (e.g. AUv2's Cocoa view factory) parents
     // Pulp's child NSView itself. Once that child is in a live window hierarchy,
     // call this to fire Pulp's view-opened lifecycle. Returns true once attached;
