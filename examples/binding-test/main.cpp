@@ -243,8 +243,9 @@ int main() {
     {
         pulp_iplug2::PulpEmbedEditor probe(ir, W, H);
         const int n = pulp_embed_param_count(probe.view());
-        int knobs = 0, discrete_with_options = 0;
+        int knobs = 0, discrete_with_options = 0, named = 0;
         bool kinds_nonempty = true, defaults_in_range = true, all_ok = (n > 0);
+        bool found_macro_depth = false, unnamed_has_no_meta = true;
         for (int i = 0; i < n; ++i) {
             PulpEmbedParamInfo pi{};
             if (pulp_embed_param_info(probe.view(), i, &pi) != PULP_EMBED_OK) all_ok = false;
@@ -252,6 +253,15 @@ int main() {
             if (pi.default_norm < 0.0 || pi.default_norm > 1.0) defaults_in_range = false;
             if (std::string(pi.widget_kind) == "knob" && !pi.is_discrete) ++knobs;
             if (pi.is_discrete && pi.option_count > 0) ++discrete_with_options;
+            // §2.1: the importer's design caption (IRInteractiveElement.label)
+            // surfaces as the param NAME with has_meta set; unnamed controls keep
+            // has_meta clear (host falls back to the key).
+            if (pi.has_meta) {
+                ++named;
+                if (std::string(pi.name) == "Macro Depth") found_macro_depth = true;
+            } else if (pi.name[0] != '\0') {
+                unnamed_has_no_meta = false;  // a name without has_meta would be a bug
+            }
         }
         check(all_ok, "param_info returns OK for every valid index");
         check(kinds_nonempty, "every control reports a non-empty widget_kind");
@@ -259,6 +269,11 @@ int main() {
         check(knobs > 0, "at least one continuous knob is reported");
         check(discrete_with_options > 0,
               "at least one discrete control reports option_count > 0 (dropdown/tab/stepper)");
+        // §2.1 end-to-end: the fixture's one labeled knob surfaces its caption.
+        check(found_macro_depth,
+              "labeled control surfaces its design caption as the param name (has_meta)");
+        check(unnamed_has_no_meta,
+              "an unnamed control reports has_meta=0 (no spurious name)");
         // out-of-range index is rejected + zero-filled
         PulpEmbedParamInfo bad{};
         bad.is_discrete = 7;
