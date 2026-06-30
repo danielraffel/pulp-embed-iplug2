@@ -15,6 +15,7 @@
 
 #include <pulp_view_embed.h>
 #include <pulp_view_embed.hpp>  // pulp::embed::ParamDesc + param_descs/read_design_params
+#include <pulp_view_embed_native.hpp>  // pulp::embed::NativeViewFactory + create_from_view
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -187,6 +188,36 @@ public:
                     std::initializer_list<std::pair<const char*, int>> keyToParamIdx,
                     bool nameFallback = true)
         : path_(std::move(source)), w_(logicalWidth), h_(logicalHeight) {
+        auto impl = std::make_unique<HostBridgeImpl<Delegate>>(delegate);
+        impl->name_fallback = nameFallback;
+        for (const auto& kv : keyToParamIdx)
+            impl->explicit_map.emplace(kv.first, kv.second);
+        bridge_ = std::move(impl);
+        createView();
+        resolveBindings();
+    }
+
+    // Native-view, visual-only: mount a hand-built compiled View (e.g. a
+    // DesignFrameView subclass) instead of an importer-generated design. The
+    // factory builds the root tree on the Pulp side. No host parameter is driven.
+    PulpEmbedEditor(pulp::embed::NativeViewFactory factory,
+                    int logicalWidth, int logicalHeight)
+        : w_(logicalWidth), h_(logicalHeight), factory_(std::move(factory)) {
+        createView();
+    }
+
+    // Native-view, interactive: mount a compiled View and bind its DesignFrameView
+    // elements' param_keys to iPlug2 IParams. Same keyToParamIdx contract as the
+    // file-based bridge ctor — the design key is the element's param_key. The
+    // binding path (resolveBindings, via pulp_embed_param_count/_key) is shared,
+    // so a native view binds exactly like an imported one.
+    template <class Delegate>
+    PulpEmbedEditor(pulp::embed::NativeViewFactory factory,
+                    int logicalWidth, int logicalHeight,
+                    Delegate& delegate,
+                    std::initializer_list<std::pair<const char*, int>> keyToParamIdx,
+                    bool nameFallback = true)
+        : w_(logicalWidth), h_(logicalHeight), factory_(std::move(factory)) {
         auto impl = std::make_unique<HostBridgeImpl<Delegate>>(delegate);
         impl->name_fallback = nameFallback;
         for (const auto& kv : keyToParamIdx)
@@ -398,11 +429,10 @@ public:
     }
 
 private:
-    // Shared construction body: build the desc (wiring the host bridge when
-    // bridge_ is set — the callbacks must be in the desc at create time, since
-    // host_ctx is captured then), create the view from a bundle dir or DesignIR
-    // JSON, and arm the dev hot-reload watcher for a bundle.
-    void createView() {
+    // Build the embed descriptor, wiring the host bridge when bridge_ is set (the
+    // callbacks must be in the desc at create time, since host_ctx is captured
+    // then). Shared by the file-based and native-view create paths.
+    PulpEmbedDesc buildDesc() const {
         PulpEmbedDesc d{};
         d.struct_size = sizeof(PulpEmbedDesc);
         d.abi_version = PULP_VIEW_EMBED_ABI_VERSION;
@@ -424,6 +454,22 @@ private:
             d.host.set_string = &HostBridgeBase::cSetString;
             d.host.get_string = &HostBridgeBase::cGetString;
         }
+        return d;
+    }
+
+    // Shared construction body: build the desc, then create the view. When a
+    // native-view factory_ is set, mount the host's compiled View (e.g. a
+    // DesignFrameView subclass) via pulp_embed_create_from_view — its param_key'd
+    // elements bind through the SAME host bridge; no file, so no hot-reload.
+    // Otherwise create from a bundle dir or DesignIR JSON and arm hot-reload.
+    void createView() {
+        PulpEmbedDesc d = buildDesc();
+
+        if (factory_) {
+            pulp::embed::pulp_embed_create_from_view(&d, std::move(factory_), &view_);
+            return;
+        }
+
         std::error_code ec;
         const bool is_bundle =
             std::filesystem::is_directory(path_, ec) ||
@@ -534,6 +580,10 @@ private:
     std::string path_;
     int w_ = 0, h_ = 0;
     PulpEmbedView* view_ = nullptr;
+    // Set when constructed from a native View factory (mutually exclusive with
+    // path_): createView() mounts it via pulp_embed_create_from_view and moves
+    // from it (one-shot). Empty for the file-based paths.
+    pulp::embed::NativeViewFactory factory_;
 
     // Host parameter bridge (null = visual-only). Type-erased so this class is
     // not templated. The destructor body runs pulp_embed_destroy(view_) BEFORE
