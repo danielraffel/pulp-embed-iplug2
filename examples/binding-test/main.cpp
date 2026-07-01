@@ -20,11 +20,14 @@
 
 #include "PulpEmbedEditor.h"
 
+#include <pulp/view/design_frame_view.hpp>  // native-view path: hand-built View
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -410,6 +413,54 @@ int main() {
             // Blind restore of an unknown key is tolerated.
             ed.restoreStringState({{"no_such_text_field", "x"}});
             check(true, "adapter: restore of an unknown key is a tolerated no-op");
+        }
+    }
+
+    // ── NATIVE-VIEW path: mount a HAND-BUILT DesignFrameView (no DesignIR/ui.js)
+    //    via the factory ctor and prove its param_key'd controls bind to the
+    //    duck-typed delegate exactly like an imported design. Proves the
+    //    pulp_embed_create_from_view + DesignFrameElement::param_key substrate
+    //    end to end through the iPlug2 adapter. ────────────────────────────────
+    {
+        using pulp::view::DesignFrameElement;
+        auto knob = [](float cx, std::string key) {
+            DesignFrameElement e;
+            e.kind = DesignFrameElement::Kind::knob;
+            e.cx = cx; e.cy = 40.0f; e.hit_radius = 18.0f;
+            e.needle_d = "M0 0L0 -8";
+            e.param_key = std::move(key);
+            return e;
+        };
+        // factory_ is moved-from inside the editor, so build a fresh factory here.
+        auto factory = [knob]() -> std::unique_ptr<pulp::view::View> {
+            const std::string svg =
+                R"(<svg width="240" height="80" xmlns="http://www.w3.org/2000/svg">)"
+                R"(<rect x="0" y="0" width="240" height="80" fill="#222"/></svg>)";
+            std::vector<DesignFrameElement> els{knob(40, "gain"), knob(120, "cutoff"),
+                                                knob(200, "")};  // last: visual-only
+            return std::make_unique<pulp::view::DesignFrameView>(svg, std::move(els));
+        };
+
+        FakeDelegate d;
+        d.params.push_back({"gain", 0.0});    // idx 0
+        d.params.push_back({"cutoff", 0.0});  // idx 1
+        pulp_iplug2::PulpEmbedEditor ed(
+            pulp::embed::NativeViewFactory{factory}, 240, 80, d,
+            {{"gain", 0}, {"cutoff", 1}}, /*nameFallback=*/false);
+        check(ed.valid(), "native-view editor created from a View factory");
+        check(ed.boundParameterCount() == 2,
+              "native: two param_key'd controls bound (keyless knob stays visual-only)");
+
+        const int gainIdx = index_of_key(ed.view(), "gain");
+        check(gainIdx >= 0, "native: 'gain' key enumerable on the live view");
+        if (gainIdx >= 0) {
+            check(pulp_embed_simulate_param_drag(ed.view(), gainIdx, 0.8) == PULP_EMBED_OK,
+                  "native: simulate_param_drag on 'gain' OK");
+            check(!d.begun.empty() && d.begun.back() == 0,
+                  "native: delegate saw Begin on param 0 (gain)");
+            check(!d.sets.empty() && d.sets.back().first == 0 &&
+                      std::fabs(d.params[0].norm - 0.8) < 0.05,
+                  "native: gain drag drove delegate param 0 to ~0.8");
         }
     }
 
