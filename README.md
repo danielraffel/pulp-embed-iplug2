@@ -215,6 +215,73 @@ metadata slice. The plugin still owns the `IParam` objects (the host stays
 authoritative); for an EXISTING plugin keep declaring params by hand and just map
 keys, with `designParams()` as a cross-check.
 
+## Value read-outs & host actions (ABI v8)
+
+Three runtime accessors let the embedded design ask the plugin questions and fire
+non-parameter actions. They are wired only when both this header and the linked
+`pulp_view_embed` library carry the v8 callback tail; pre-v8 they degrade
+gracefully (`has_param` falls back to the `-1.0 get_param` sentinel, display/
+action are simply unavailable). `PulpEmbedEditor` sets
+`desc.abi_version = min(PULP_VIEW_EMBED_ABI_VERSION, pulp_embed_abi_version())`,
+so a header built ahead of the shim (or vice versa) never asserts a capability
+neither side agrees on.
+
+```cpp
+// has_param — does a design key drive a host param? (belt-and-suspenders behind
+// the get_param sentinel; unresolved keys are logged once):
+editor.hasParam("cutoff");   // -> true once bound
+
+// param_display_text — a formatted value read-out ("-6.0 dB"), memoized per
+// (key, value). Supply the formatter; its body calls iPlug2 IParam::GetDisplay
+// (with a WDL_String) in YOUR translation unit, keeping this header SDK-free:
+editor.setParamDisplayFormatter([this](const std::string& key, double norm) {
+  WDL_String s;
+  GetParam(mKeyToIdx.at(key))->GetDisplayForHost(norm, /*normalized*/ true, s);
+  return std::string(s.Get());
+});
+
+// host_action — an out-of-band UI action (a settings button, an "open manual"
+// link) that isn't a parameter. The handler parses args_json and returns
+// non-zero if it handled the action:
+editor.setHostActionHandler([](const std::string& action, const std::string& args_json) {
+  if (action == "open_manual") { /* ... */ return 1; }
+  return 0;
+});
+```
+
+## Resize
+
+Unlike JUCE — where an `AudioProcessorEditor` drives its own bounds and the
+adapter's `resized()` forwards them — an **iPlug2 plugin constrains its editor
+window itself**: the initial size is `PLUG_WIDTH`/`PLUG_HEIGHT` (`config.h`) and
+resizes flow through the plugin's `OnParentWindowResize` / a host-driven
+`ConstrainEditorResize`. The imported design's own constraints live in the
+materialized view (`pulp_embed_size_hints`). `PulpEmbedEditor` exposes them as
+the idiomatic iPlug2 seam:
+
+```cpp
+// ctor: seed the initial editor size from the design's preferred size.
+int w = kW, h = kH;
+editor.preferredSize(w, h);   // design pref, or the ctor logical size
+SetEditorSize(w, h);
+
+// OpenWindow: size-on-open honoring aspect/min/max.
+editor.applyPreferredSizeOnOpen();
+
+// OnParentWindowResize: clamp the host-requested size to the design's
+// aspect/min/max before applying it.
+void OnParentWindowResize(int width, int height) override {
+  editor.constrainSize(width, height);   // enforce min/max, lock aspect
+  editor.resize(width, height, 1.0f);
+}
+
+editor.isResizable();   // 1 iff the design declares itself resizable
+```
+
+`constrainSize` treats width as the primary drag axis: with an aspect lock it
+derives the height from the width, then re-clamps so the lock never violates
+min/max.
+
 ## Build (compile/link check)
 
 ```bash
@@ -273,6 +340,17 @@ a post-build step.
 scripted-UI path) vs a `.json` DesignIR file (lightweight native path). The AU
 type/subtype/manufacturer (`aufx` / `Pemb` / `Pulp`) live in the per-format
 Info.plist templates under `example/resources/`.
+
+### Native-view plugin example
+
+`examples/native-view-plugin/` is a second real plugin (APP + VST3 + AU + CLAP)
+whose editor is a **hand-built compiled Pulp `View`** (a `DesignFrameView` with
+two `param_key`'d knobs) mounted via `PulpEmbedEditor`'s **native-view factory**
+ctor — not an importer bundle. It exercises the full adapter surface in a real
+target: native-view parameter binding, the ABI v8 value read-outs + host
+actions, and the P3 resize recipe. It needs an iPlug2 checkout + Pulp SDK to
+build; its scaffold is validated headlessly by the `native-view-plugin-scaffold`
+ctest (file-content assertions). See `examples/native-view-plugin/README.md`.
 
 ### Validate
 

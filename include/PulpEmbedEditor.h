@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -132,6 +133,89 @@ struct HostBridgeBase {
             out[c] = '\0';
         }
         return n;
+    }
+
+    // ── ABI v8 runtime accessors (has_param / param_display_text / host_action) ─
+    //
+    // These back the view->host query callbacks the embed uses to render live
+    // parameter chrome (value read-outs, "does this control drive a host
+    // param?" hit-tests) and to fire non-parameter UI actions (a settings-panel
+    // button, an "open manual" link) without minting a fake param. All three
+    // are keyed/named by the same design strings as the numeric bridge, share
+    // the bridge's host_ctx, and run on the host UI thread.
+    //
+    // has_param — belt-and-suspenders behind the existing -1.0 get_param
+    //   sentinel: `bound` is the resolved key set (explicit map + name
+    //   fallback), so a key resolves iff it is in `bound`. Unresolved keys are
+    //   logged ONCE (a design referencing a control the plugin never mapped is
+    //   a wiring bug worth surfacing, but only once — the embed may query every
+    //   frame).
+    // param_display_text — a formatted, human-readable value string ("-6.0 dB",
+    //   "440 Hz", "On"). The plugin supplies the formatter via
+    //   setParamDisplayFormatter (its body calls iPlug2 IParam::GetDisplay with
+    //   a WDL_String in the plugin TU — kept out of this framework-neutral
+    //   header so the compile/link check stays SDK-free). Results are memoized
+    //   per (key, quantized value) because the embed may ask for the same
+    //   read-out every repaint.
+    // host_action — an out-of-band UI action; the plugin's handler parses
+    //   `args_json` and returns non-zero if it handled the action.
+    std::function<std::string(const std::string& key, double normalized)> on_param_display;
+    std::function<int(const std::string& action, const std::string& args_json)> on_host_action;
+    std::unordered_map<std::string, std::string> display_memo;  // (key\x1fvalue) -> text
+    std::unordered_set<std::string> logged_unresolved;          // has_param log-once
+
+    bool has_param_impl(const char* key) {
+        if (key && find_idx(key) >= 0) return true;
+        const std::string k = key ? key : "";
+        if (logged_unresolved.insert(k).second)
+            std::fprintf(stderr,
+                         "[pulp-embed-iplug2] has_param: design key \"%s\" resolves "
+                         "to no host parameter (visual-only?)\n",
+                         k.c_str());
+        return false;
+    }
+
+    std::string param_display_impl(const char* key, double normalized) {
+        const std::string k = key ? key : "";
+        char vbuf[24];
+        std::snprintf(vbuf, sizeof vbuf, "%.4f", normalized);
+        const std::string mk = k + '\x1f' + vbuf;
+        const auto it = display_memo.find(mk);
+        if (it != display_memo.end()) return it->second;
+        std::string out;
+        if (on_param_display) {
+            out = on_param_display(k, normalized);
+        } else {
+            // No plugin formatter: fall back to a normalized read-out so the
+            // embed still shows *a* value instead of nothing.
+            char b[24];
+            std::snprintf(b, sizeof b, "%.2f", normalized);
+            out = b;
+        }
+        display_memo.emplace(mk, out);
+        return out;
+    }
+
+    static int32_t cHasParam(void* ctx, const char* key) {
+        return static_cast<HostBridgeBase*>(ctx)->has_param_impl(key) ? 1 : 0;
+    }
+    static size_t cParamDisplayText(void* ctx, const char* key, double normalized,
+                                    char* buf, size_t cap) {
+        const std::string s =
+            static_cast<HostBridgeBase*>(ctx)->param_display_impl(key, normalized);
+        const size_t n = s.size();
+        if (buf && cap > 0) {
+            const size_t c = n < cap - 1 ? n : cap - 1;
+            std::memcpy(buf, s.data(), c);
+            buf[c] = '\0';
+        }
+        return n;
+    }
+    static int32_t cHostAction(void* ctx, const char* action, const char* args_json) {
+        auto* b = static_cast<HostBridgeBase*>(ctx);
+        return b->on_host_action ? b->on_host_action(action ? action : "",
+                                                     args_json ? args_json : "")
+                                 : 0;
     }
 };
 
@@ -416,6 +500,115 @@ public:
         if (bridge_) bridge_->on_string = std::move(fn);
     }
 
+    // ── ABI v8 runtime accessors (has_param / param_display_text / host_action) ─
+    //
+    // These need a bound bridge (constructed with a delegate), same as the
+    // string-change handler — they share that bridge's host_ctx. On a
+    // visual-only editor hasParam is false, paramDisplayText is empty, and host
+    // actions are ignored.
+
+    // Does a design control key resolve to a bound host parameter? (Mirrors the
+    // v8 has_param callback; the belt-and-suspenders check behind the -1.0
+    // get_param sentinel.) Const — does not log (the callback path logs once).
+    bool hasParam(const char* key) const {
+        return bridge_ && bridge_->find_idx(key) >= 0;
+    }
+
+    // Formatted, human-readable display of a NORMALIZED value for a design key
+    // ("-6.0 dB", "440 Hz"). Memoized per (key, value). Uses the formatter set
+    // via setParamDisplayFormatter; without one, returns a normalized read-out.
+    std::string paramDisplayText(const char* key, double normalized) const {
+        return bridge_ ? bridge_->param_display_impl(key, normalized) : std::string();
+    }
+
+    // Supply the value->text formatter. The plugin's body calls iPlug2
+    // IParam::GetDisplay (with a WDL_String) in ITS translation unit — kept out
+    // of this framework-neutral header so the compile/link check stays SDK-free:
+    //   editor.setParamDisplayFormatter([this](const std::string& key, double n) {
+    //     WDL_String s; GetParam(mKeyToIdx.at(key))->GetDisplayForHost(n, true, s);
+    //     return std::string(s.Get());
+    //   });
+    void setParamDisplayFormatter(std::function<std::string(const std::string&, double)> fn) {
+        if (bridge_) { bridge_->on_param_display = std::move(fn); bridge_->display_memo.clear(); }
+    }
+
+    // Handle an out-of-band UI action (a non-parameter button/link). The handler
+    // parses `args_json` and returns non-zero if it handled the action. Backs
+    // the v8 host_action callback.
+    void setHostActionHandler(std::function<int(const std::string&, const std::string&)> fn) {
+        if (bridge_) bridge_->on_host_action = std::move(fn);
+    }
+
+    // Fire a host action directly (the same entry point the v8 host_action
+    // callback trampolines to). Returns the handler's result, or 0 if none.
+    int dispatchHostAction(const std::string& action, const std::string& args_json = "{}") {
+        return bridge_ && bridge_->on_host_action ? bridge_->on_host_action(action, args_json) : 0;
+    }
+
+    // ── Resize recipe (P3) ──────────────────────────────────────────────────
+    //
+    // Unlike JUCE — where an AudioProcessorEditor drives its OWN bounds and the
+    // adapter's resized() forwards them — an iPlug2 plugin CONSTRAINS its editor
+    // window itself: the initial size is PLUG_WIDTH/PLUG_HEIGHT (config.h) and
+    // resizes flow through the plugin's OnParentWindowResize / a host-driven
+    // ConstrainEditorResize path. The design's own constraints live in the
+    // materialized view (pulp_embed_size_hints). These helpers are the idiomatic
+    // iPlug2 seam: read the design's hints, seed the initial editor bounds
+    // (size-on-open), and clamp host resizes to the design's aspect/min/max.
+    // The plugin calls preferredSize() in its ctor to feed SetEditorSize(), and
+    // constrainSize() from OnParentWindowResize(); the helper names no iPlug2
+    // type, so it stays in the framework-neutral header. See README "Resize".
+
+    // The design's resize constraints (preferred/min/max/aspect/resizable).
+    PulpEmbedSizeHints sizeHints() const {
+        PulpEmbedSizeHints h{};
+        if (view_) pulp_embed_size_hints(view_, &h);
+        return h;
+    }
+
+    // 1 iff the imported design declares itself resizable.
+    bool isResizable() const { return sizeHints().resizable != 0; }
+
+    // The design's preferred initial size (falls back to the ctor logical size
+    // when the design carries no preference). Seed SetEditorSize() with this.
+    void preferredSize(int& w, int& h) const {
+        const PulpEmbedSizeHints hn = sizeHints();
+        w = hn.preferred_width  > 0 ? hn.preferred_width  : w_;
+        h = hn.preferred_height > 0 ? hn.preferred_height : h_;
+    }
+
+    // Clamp a requested (w,h) to the design's min/max, then — if the design
+    // locks an aspect ratio — derive the dependent axis from the width (the
+    // primary drag axis), re-clamping so the lock never violates min/max. Call
+    // from the plugin's ConstrainEditorResize / OnParentWindowResize.
+    void constrainSize(int& w, int& h) const {
+        const PulpEmbedSizeHints hn = sizeHints();
+        if (hn.min_width  > 0 && w < hn.min_width)  w = hn.min_width;
+        if (hn.min_height > 0 && h < hn.min_height) h = hn.min_height;
+        if (hn.max_width  > 0 && w > hn.max_width)  w = hn.max_width;
+        if (hn.max_height > 0 && h > hn.max_height) h = hn.max_height;
+        if (hn.aspect_ratio > 0.0f) {
+            h = static_cast<int>(static_cast<float>(w) / hn.aspect_ratio + 0.5f);
+            if (hn.min_height > 0 && h < hn.min_height) {
+                h = hn.min_height;
+                w = static_cast<int>(h * hn.aspect_ratio + 0.5f);
+            }
+            if (hn.max_height > 0 && h > hn.max_height) {
+                h = hn.max_height;
+                w = static_cast<int>(h * hn.aspect_ratio + 0.5f);
+            }
+        }
+    }
+
+    // Size-on-open: size the embedded view to the design's preferred size,
+    // honoring aspect/min/max. Call once after open()/notifyAttached().
+    void applyPreferredSizeOnOpen() {
+        int w = w_, h = h_;
+        preferredSize(w, h);
+        constrainSize(w, h);
+        resize(w, h, 1.0f);
+    }
+
     // Dev hot-reload watcher: poll the bundle's ui.js mtime on tick() and call
     // pulp_embed_reload_bundle when it changes (debounced one tick vs a mid-write
     // save). Editing the bundle reloads the open editor live — no DAW reload.
@@ -435,7 +628,13 @@ private:
     PulpEmbedDesc buildDesc() const {
         PulpEmbedDesc d{};
         d.struct_size = sizeof(PulpEmbedDesc);
-        d.abi_version = PULP_VIEW_EMBED_ABI_VERSION;
+        // Negotiate down to the LOWER of what this header knows and what the
+        // linked library actually implements, so a header built ahead of the
+        // shim (or vice versa) degrades gracefully instead of asserting a
+        // capability neither side agrees on. struct_size still gates which
+        // trailing callback fields the shim reads.
+        const uint32_t lib = pulp_embed_abi_version();
+        d.abi_version = PULP_VIEW_EMBED_ABI_VERSION < lib ? PULP_VIEW_EMBED_ABI_VERSION : lib;
         d.logical_width = w_;
         d.logical_height = h_;
         d.scale_factor = 1.0f;
@@ -453,6 +652,19 @@ private:
             // keep imported default) so a preset can be pre-loaded before create.
             d.host.set_string = &HostBridgeBase::cSetString;
             d.host.get_string = &HostBridgeBase::cGetString;
+#if defined(PULP_VIEW_EMBED_ABI_VERSION) && PULP_VIEW_EMBED_ABI_VERSION >= 8
+            // ABI v8 runtime accessors — wired only when BOTH this header and
+            // the linked library carry the v8 callback tail. struct_size gates
+            // field presence in the shim; the runtime check keeps a v8 header
+            // linked against a pre-v8 library from writing fields the shim
+            // won't read. Pre-v8, has_param degrades to the -1.0 get_param
+            // sentinel and display/action are simply unavailable.
+            if (lib >= 8u) {
+                d.host.has_param          = &HostBridgeBase::cHasParam;
+                d.host.param_display_text = &HostBridgeBase::cParamDisplayText;
+                d.host.host_action        = &HostBridgeBase::cHostAction;
+            }
+#endif
         }
         return d;
     }
