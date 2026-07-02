@@ -52,7 +52,7 @@ add_test(NAME binding-test COMMAND pulp-embed-iplug2-binding-test)
 # Native-view real-plugin example scaffold assertion. The example is a real
 # iPlug2 plugin (examples/native-view-plugin/) that needs an iPlug2 checkout +
 # Pulp SDK install to build, so this test proves the scaffold is coherent and
-# wires the adapter surface (native-view factory binding, ABI v8 accessors, P3
+# wires the adapter surface (native-view factory binding, ABI v8 accessors,
 # resize recipe) via file-content assertions — no build required.
 add_test(NAME native-view-plugin-scaffold
     COMMAND ${CMAKE_COMMAND}

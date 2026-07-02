@@ -545,7 +545,7 @@ public:
         return bridge_ && bridge_->on_host_action ? bridge_->on_host_action(action, args_json) : 0;
     }
 
-    // ── Resize recipe (P3) ──────────────────────────────────────────────────
+    // ── Resize recipe ─────────────────────────────────────────────────────────
     //
     // Unlike JUCE — where an AudioProcessorEditor drives its OWN bounds and the
     // adapter's resized() forwards them — an iPlug2 plugin CONSTRAINS its editor

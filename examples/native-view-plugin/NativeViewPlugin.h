@@ -16,7 +16,7 @@ using namespace iplug;
 //     binds the compiled view's knobs to kGain / kCutoff bidirectionally,
 //   * the ABI v8 accessors (setParamDisplayFormatter -> IParam::GetDisplay,
 //     setHostActionHandler),
-//   * the P3 resize recipe (preferredSize seeds SetEditorSize; constrainSize
+//   * the resize recipe (preferredSize seeds SetEditorSize; constrainSize
 //     clamps host resizes to the design's aspect/min/max).
 //
 // Unlike the framework-neutral file-based example (example/), the native-view

@@ -1,7 +1,7 @@
 # Real iPlug2 plugin (APP + VST3 + AU + CLAP) whose editor is a HAND-BUILT
 # compiled Pulp View (the NATIVE-VIEW path) rather than an importer bundle. It
 # exercises the full adapter surface end to end: the NativeViewFactory binding
-# ctor, the ABI v8 accessors (param display text + host actions), and the P3
+# ctor, the ABI v8 accessors (param display text + host actions), and the
 # resize recipe. See README.md.
 #
 # Configure (Release):

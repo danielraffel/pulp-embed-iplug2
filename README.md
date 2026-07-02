@@ -348,7 +348,7 @@ whose editor is a **hand-built compiled Pulp `View`** (a `DesignFrameView` with
 two `param_key`'d knobs) mounted via `PulpEmbedEditor`'s **native-view factory**
 ctor — not an importer bundle. It exercises the full adapter surface in a real
 target: native-view parameter binding, the ABI v8 value read-outs + host
-actions, and the P3 resize recipe. It needs an iPlug2 checkout + Pulp SDK to
+actions, and the resize recipe. It needs an iPlug2 checkout + Pulp SDK to
 build; its scaffold is validated headlessly by the `native-view-plugin-scaffold`
 ctest (file-content assertions). See `examples/native-view-plugin/README.md`.
 

@@ -524,7 +524,7 @@ int main() {
         check(ed.dispatchHostAction("x") == 0, "visual-only: dispatchHostAction() is a no-op");
     }
 
-    // ── P3 resize recipe: the design's size hints feed the iPlug2 constrain
+    // ── Resize recipe: the design's size hints feed the iPlug2 constrain
     //    path (preferred size-on-open + aspect/min/max clamp). ─────────────────
     {
         pulp_iplug2::PulpEmbedEditor ed(ir, W, H);

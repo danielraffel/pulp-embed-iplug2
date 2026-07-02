@@ -3,7 +3,7 @@
 # The example is a REAL iPlug2 plugin but cannot be built without an iPlug2
 # checkout + a Pulp SDK install, so this test proves the scaffold is coherent and
 # wires the load-bearing adapter surface (native-view factory binding, ABI v8
-# accessors, P3 resize recipe). Run via `cmake -P scaffold_check.cmake` — no
+# accessors, resize recipe). Run via `cmake -P scaffold_check.cmake` — no
 # build required. Fails loudly (FATAL_ERROR) on any missing file/marker.
 
 set(_dir "${CMAKE_CURRENT_LIST_DIR}")
@@ -31,13 +31,13 @@ foreach(_marker
   endif()
 endforeach()
 
-# ABI v8 accessors + P3 resize recipe are actually wired.
+# ABI v8 accessors + resize recipe are actually wired.
 foreach(_marker
     "setParamDisplayFormatter"         # v8 param_display_text seam
     "GetDisplayForHost"                # routed through iPlug2 IParam::GetDisplay
     "setHostActionHandler"             # v8 host_action seam
-    "applyPreferredSizeOnOpen"         # P3 size-on-open
-    "constrainSize")                   # P3 host-resize clamp
+    "applyPreferredSizeOnOpen"         # size-on-open
+    "constrainSize")                   # host-resize clamp
   string(FIND "${_mm}" "${_marker}" _pos)
   if(_pos EQUAL -1)
     message(FATAL_ERROR "NativeViewPlugin.mm missing adapter-surface marker: ${_marker}")

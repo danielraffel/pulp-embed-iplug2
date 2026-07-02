@@ -93,7 +93,7 @@ void* PulpNativeViewIPlug::OpenWindow(void* pParent)
     [child setFrame:NSMakeRect(0.f, 0.f, (float) PLUG_WIDTH, (float) PLUG_HEIGHT)];
   }
 
-  // P3: size the view to the design's preferred size, honoring aspect/min/max.
+  // Size the view to the design's preferred size, honoring aspect/min/max.
   mEmbed->applyPreferredSizeOnOpen();
   return mEmbed->nativeHandle();
 }
@@ -111,7 +111,7 @@ void PulpNativeViewIPlug::CloseWindow()
 void PulpNativeViewIPlug::OnParentWindowResize(int width, int height)
 {
   if (!mEmbed) return;
-  // P3: clamp the host-requested size to the design's constraints before
+  // Clamp the host-requested size to the design's constraints before
   // applying it (the idiomatic iPlug2 ConstrainEditorResize seam).
   mEmbed->constrainSize(width, height);
   mEmbed->resize(width, height, 1.0f);

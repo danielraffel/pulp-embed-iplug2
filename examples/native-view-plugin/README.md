@@ -21,7 +21,7 @@ the headless `examples/binding-test/` harness proves with a fake delegate:
 - **ABI v8 host actions (`host_action`)** — `setHostActionHandler` handles a
   non-parameter UI action (e.g. an "open manual" link) without minting a fake
   param.
-- **P3 resize recipe** — `preferredSize()`/`applyPreferredSizeOnOpen()` seeds the
+- **Resize recipe** — `preferredSize()`/`applyPreferredSizeOnOpen()` seeds the
   editor size from the design's `pulp_embed_size_hints`, and `constrainSize()` in
   `OnParentWindowResize` clamps host-driven resizes to the design's
   aspect/min/max — the idiomatic iPlug2 `ConstrainEditorResize` seam.
