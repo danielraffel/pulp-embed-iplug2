@@ -1,8 +1,27 @@
 # pulp-embed-iplug2
 
-An [iPlug2](https://github.com/iPlug2/iPlug2) adapter for
-[`pulp-view-embed`](https://github.com/danielraffel/pulp-view-embed): embed a Pulp-imported design (e.g. a
-Figma frame) in an iPlug2 plugin's editor.
+The **adapter library** (`PulpEmbedEditor`) that embeds a Pulp-imported design
+(e.g. a Figma frame) in an [iPlug2](https://github.com/iPlug2/iPlug2) plugin's
+editor. It's an iPlug2 wrapper over
+[`pulp-view-embed`](https://github.com/danielraffel/pulp-view-embed). The importer
+and a future new-plugin template both depend on this adapter — **this is the
+bridge you extend or study**, not a starting point for your own plugin.
+
+## Which repo do I want?
+
+Three iPlug2 pieces, and they are **not interchangeable**:
+
+| I want to… | Repo |
+|---|---|
+| **Import an existing iPlug2 plugin's UI** — automated: a Pulp UI over your *unchanged* iPlug2 DSP (`--emit hybrid-ui`) | [`pulp-import-iplug`](https://github.com/danielraffel/pulp-import-iplug) |
+| **Start a NEW plugin from scratch** with a hand-built Pulp UI | a dedicated iPlug2 template (not yet published — until then, start from `example/` here) |
+| **Extend / understand the bridge** both of the above depend on | **`pulp-embed-iplug2` — the adapter library (this repo)** |
+
+**Most common mix-up:** to bring an **existing** plugin's UI across, use
+[`pulp-import-iplug`](https://github.com/danielraffel/pulp-import-iplug), not this
+adapter directly. Canonical map: the Pulp SDK guide
+[**Putting a Pulp UI in a JUCE plugin**](https://github.com/danielraffel/pulp/blob/main/docs/guides/juce-embed.md)
+(its iPlug2 note covers this adapter/importer pair).
 
 > Status: **experiment**. The adapter helper (`include/PulpEmbedEditor.h`) is
 > framework-neutral — it drives the flat C ABI and takes the parent native
