@@ -49,6 +49,15 @@ if(APPLE)
 endif()
 add_test(NAME binding-test COMMAND pulp-embed-iplug2-binding-test)
 
+# Native-view real-plugin example scaffold assertion. The example is a real
+# iPlug2 plugin (examples/native-view-plugin/) that needs an iPlug2 checkout +
+# Pulp SDK install to build, so this test proves the scaffold is coherent and
+# wires the adapter surface (native-view factory binding, ABI v8 accessors,
+# resize recipe) via file-content assertions — no build required.
+add_test(NAME native-view-plugin-scaffold
+    COMMAND ${CMAKE_COMMAND}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/examples/native-view-plugin/scaffold_check.cmake)
+
 # Linux: re-mention fontconfig AFTER libskia.a on each Skia-linking executable
 # (single-pass GNU ld; the Skia archive references Fc* symbols). The helper is
 # exposed by the Pulp SDK's PulpConfig (loaded via the pulp-view-embed subdir's
