@@ -20,7 +20,7 @@ Three iPlug2 pieces, and they are **not interchangeable**:
 **Most common mix-up:** to bring an **existing** plugin's UI across, use
 [`pulp-import-iplug`](https://github.com/danielraffel/pulp-import-iplug), not this
 adapter directly. Canonical map: the Pulp SDK guide
-[**Putting a Pulp UI in a JUCE plugin**](https://github.com/danielraffel/pulp/blob/main/docs/guides/juce-embed.md)
+[**Putting a Pulp UI in a JUCE plugin**](https://github.com/Generous-Corp/pulp/blob/main/docs/guides/juce-embed.md)
 (its iPlug2 note covers this adapter/importer pair).
 
 > Status: **experiment**. The adapter helper (`include/PulpEmbedEditor.h`) is

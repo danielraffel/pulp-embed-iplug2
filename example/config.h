@@ -4,7 +4,7 @@
 #define PLUG_VERSION_STR "0.1.0"
 #define PLUG_UNIQUE_ID 'Pemb'
 #define PLUG_MFR_ID 'Pulp'
-#define PLUG_URL_STR "https://github.com/danielraffel/pulp"
+#define PLUG_URL_STR "https://github.com/Generous-Corp/pulp"
 #define PLUG_EMAIL_STR "noreply@pulp.dev"
 #define PLUG_COPYRIGHT_STR "Copyright 2026 Pulp"
 #define PLUG_CLASS_NAME PulpEmbedIPlug
