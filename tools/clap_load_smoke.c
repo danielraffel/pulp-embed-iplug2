@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
   host.host_data = NULL;
   host.name = "clap_load_smoke";
   host.vendor = "Pulp";
-  host.url = "https://github.com/danielraffel/pulp";
+  host.url = "https://github.com/Generous-Corp/pulp";
   host.version = "0.1.0";
   host.get_extension = NULL;
   host.request_restart = NULL;
